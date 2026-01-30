@@ -8,3 +8,4 @@ dependencies:
     version: "~2"
     rules:
       - if: "target in [esp32p4, esp32h2]"
+  espressif/mdns: '*'

@@ -1,4 +1,6 @@
 #include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "network.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
@@ -25,6 +27,9 @@
 
 #define MDNS_HOST_NAME "blackmagic"
 #define MDNS_INSTANCE "blackmagic web server"
+
+#define WIFI_CONNECTED_BIT BIT0
+static EventGroupHandle_t s_wifi_event_group;
 
 void network_hostnames_init(void)
 {
@@ -82,6 +87,7 @@ static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
     {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
@@ -96,12 +102,8 @@ static void wifi_init_sta(void)
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_sta_event_handler,
-                                                        NULL,
-                                                        NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_sta_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL));
 
     wifi_config_t wifi_config = {
         .sta = {
@@ -123,12 +125,7 @@ static void wifi_init_softap(void)
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_sta_event_handler, NULL));
 
     wifi_config_t wifi_config = {
         .ap = {
@@ -170,6 +167,8 @@ static void wifi_init_softap(void)
 
 void network_init(void)
 {
+    s_wifi_event_group = xEventGroupCreate();
+
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -179,26 +178,19 @@ void network_init(void)
     wifi_init_sta();
 
     ESP_LOGI(TAG, "Connecting to WiFi as STA...");
-    // // Ждем подключения STA 5 секунд, если не удалось — поднимаем AP
-    // EventBits_t bits = xEventGroupWaitBits(
-    //     WIFI_EVENT,
-    //     WIFI_EVENT_STA_CONNECTED,
-    //     pdFALSE,
-    //     pdFALSE,
-    //     pdMS_TO_TICKS(5000)
-    // );
 
-    // sys_delay_ms(30000);
-    wifi_ap_record_t ap_info;
-    esp_err_t sta_connected = ESP_FAIL; // esp_wifi_sta_get_ap_info(&ap_info);
-    // if (sta_connected != ESP_OK) {
-    ESP_LOGW(TAG, "STA connect failed, switching to AP mode");
-    // ESP_ERROR_CHECK(esp_wifi_stop());
-    // ESP_ERROR_CHECK(esp_wifi_deinit());
-    // vTaskDelay(pdMS_TO_TICKS(500));
-    // ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
-    // wifi_init_softap();
-    // } else {
-    // ESP_LOGI(TAG, "Connected to AP as STA");
-    // }
+    EventBits_t bits = xEventGroupWaitBits(
+        s_wifi_event_group,
+        WIFI_CONNECTED_BIT,
+        pdFALSE,
+        pdFALSE,
+        pdMS_TO_TICKS(5000)
+    );
+
+    if ((bits & WIFI_CONNECTED_BIT) == 0) {
+        ESP_LOGW(TAG, "STA connect failed, switching to AP mode");
+        wifi_init_softap();
+    } else {
+        ESP_LOGI(TAG, "Connected to AP as STA");
+    }
 }

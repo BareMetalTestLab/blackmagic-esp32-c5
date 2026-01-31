@@ -59,7 +59,7 @@ void network_hostnames_init(void)
     ESP_LOGI(TAG, "init netbios done");
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+static void wifi_ap_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
     if (event_id == WIFI_EVENT_AP_STACONNECTED)
@@ -184,13 +184,16 @@ void network_init(void)
         WIFI_CONNECTED_BIT,
         pdFALSE,
         pdFALSE,
-        pdMS_TO_TICKS(5000)
-    );
+        pdMS_TO_TICKS(5000));
 
-    if ((bits & WIFI_CONNECTED_BIT) == 0) {
+    if ((bits & WIFI_CONNECTED_BIT) == 0)
+    {
+        esp_wifi_stop();
         ESP_LOGW(TAG, "STA connect failed, switching to AP mode");
         wifi_init_softap();
-    } else {
+    }
+    else
+    {
         ESP_LOGI(TAG, "Connected to AP as STA");
     }
 }

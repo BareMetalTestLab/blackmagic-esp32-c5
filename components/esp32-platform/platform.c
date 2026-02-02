@@ -190,8 +190,3 @@ void debug_serial_send_stdout(const uint8_t *const data, const size_t len)
     (void)data;
     (void)len;
 }
-
-bool onboard_flash_scan(void)
-{
-    return false;
-}

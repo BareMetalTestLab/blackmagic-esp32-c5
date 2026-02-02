@@ -31,7 +31,6 @@ void gdb_application_thread(void *pvParameters)
             if (!gdb_target_running || !cur_target)
                 break;
             char c = gdb_if_getchar_to(0);
-            ESP_LOGI("gdb", "%d", c);
 
             if (c == '\x03' || c == '\x04')
                 target_halt_request(cur_target);

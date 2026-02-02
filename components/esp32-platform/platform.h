@@ -1,5 +1,6 @@
 #pragma once
 #include <timing.h>
+#include <stdbool.h>
 
 extern uint32_t swd_delay_cnt;
 

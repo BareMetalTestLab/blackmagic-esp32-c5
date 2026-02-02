@@ -22,6 +22,7 @@ set(BM_TARGETS
     ${BM_DIR}/src/target/cortexar.c
     ${BM_DIR}/src/target/cortexm.c
     ${BM_DIR}/src/target/semihosting.c
+    ${BM_DIR}/src/target/onboard_flash.c
     ${BM_DIR}/src/crc32.c
     ${BM_DIR}/src/target/efm32.c
     ${BM_DIR}/src/exception.c
@@ -57,6 +58,7 @@ set(BM_TARGETS
     ${BM_DIR}/src/target/samd.c
     ${BM_DIR}/src/target/samx5x.c
     ${BM_DIR}/src/target/sfdp.c
+    ${BM_DIR}/src/target/stm32_common.c
     ${BM_DIR}/src/target/stm32f1.c
     ${BM_DIR}/src/target/ch32f1.c
     ${BM_DIR}/src/target/stm32f4.c
@@ -89,6 +91,7 @@ execute_process(
 message(STATUS "BM version: ${BM_GIT_DESC}")
 
 idf_component_register(SRCS ${BM_SOURCES} ${BM_TARGETS}
-    INCLUDE_DIRS ${BM_INCLUDE} PRIV_REQUIRES esp_driver_gpio esp_timer)
+    INCLUDE_DIRS ${BM_INCLUDE} PRIV_REQUIRES esp_driver_gpio esp_timer
+    WHOLE_ARCHIVE)
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -DPC_HOSTED=0 -DFIRMWARE_VERSION="${BM_GIT_DESC}" -Wno-char-subscripts -Wno-attributes -std=gnu11)

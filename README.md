@@ -39,3 +39,8 @@ idf.py flash monitor
 `$ target extended-remote <ip_esp32>:2345`
 `$ monitor swdp_scan`
 `$ attach 1`
+
+## RTT Support
+To enable RTT support, ensure the following:
+1. In `CMakeLists.txt`, add the definition `-DENABLE_RTT=1`.
+2. Use telnet to connect to the RTT server on port 2346. `$ telnet <ip_esp32> 2346`

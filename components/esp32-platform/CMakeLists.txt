@@ -8,6 +8,7 @@ set(BM_SOURCES
     ${BM_DIR}/src/platforms/common/jtagtap.c
     platform.c
     gdb-glue.c
+    rtt_if.c
 )
 
 set(BM_TARGETS
@@ -52,6 +53,7 @@ set(BM_TARGETS
 
     # ${BM_DIR}/src/target/platform.c
     ${BM_DIR}/src/remote.c
+    ${BM_DIR}/src/rtt.c
     # ${BM_DIR}/src/target/rp.c
     ${BM_DIR}/src/target/sam3x.c
     ${BM_DIR}/src/target/sam4l.c

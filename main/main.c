@@ -9,6 +9,10 @@
 #include "network.h"
 #include "network-gdb.h"
 
+#ifdef ENABLE_RTT
+#include "network-rtt.h"
+#endif
+
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
@@ -16,6 +20,11 @@
 #include "gdb_if.h"
 #include "platform.h"
 #include "gdb-glue.h"
+
+#ifdef ENABLE_RTT
+#include "rtt.h"
+#include "rtt_if_esp32.h"
+#endif
 
 void gdb_application_thread(void *pvParameters)
 {
@@ -65,6 +74,10 @@ void app_main(void)
 
     network_init();
     network_gdb_server_init();
+    
+#ifdef ENABLE_RTT
+    network_rtt_server_init();
+#endif
 
     xTaskCreate(&gdb_application_thread, "gdb_thread", 4096, NULL, 5, NULL);
 }

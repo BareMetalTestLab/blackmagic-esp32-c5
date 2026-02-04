@@ -80,3 +80,7 @@ bool gdb_serial_get_dtr(void);
 
 void debug_serial_run(void);
 uint32_t debug_serial_fifo_send(const char *fifo, uint32_t fifo_begin, uint32_t fifo_end);
+
+/* RTT buffer sizes for ESP32 platform */
+#define RTT_UP_BUF_SIZE   (2048U + 8U)
+#define RTT_DOWN_BUF_SIZE 512U

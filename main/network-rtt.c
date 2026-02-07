@@ -39,12 +39,13 @@ void network_rtt_send(uint8_t *buffer, size_t size)
 {
     if (!network_rtt.connected || network_rtt.socket_id < 0)
         return;
-        
+
     int to_write = size;
     while (to_write > 0)
     {
         int written = send(network_rtt.socket_id, buffer + (size - to_write), to_write, 0);
-        if (written < 0) {
+        if (written < 0)
+        {
             ESP_LOGE(TAG, "Error sending data: errno %d", errno);
             network_rtt.connected = false;
             break;
@@ -157,7 +158,8 @@ static void network_rtt_server_task(void *pvParameters)
 #else
         // Just wait for disconnect if RTT is not enabled
         char dummy;
-        while (recv(sock, &dummy, 1, 0) > 0);
+        while (recv(sock, &dummy, 1, 0) > 0)
+            ;
 #endif
 
         ESP_LOGI(TAG, "Socket closed");
@@ -174,6 +176,8 @@ CLEAN_UP:
 
 void network_rtt_server_init(void)
 {
+#ifdef ENABLE_RTT
     rtt_if_init();
+#endif
     xTaskCreate(network_rtt_server_task, "rtt_server", 4096, (void *)AF_INET, 5, NULL);
 }

@@ -47,6 +47,12 @@ npm install       # Install dependencies (first time only)
 npm run build     # Build and generate C header file (optional - done automatically)
 ```
 
+**Features:**
+- 📁 Drag & drop firmware files (.bin, .elf)
+- 🖱️ Click to browse alternative
+- ✅ Automatic file validation
+- 📊 Real-time upload progress
+
 The build process:
 1. Inlines CSS and JavaScript into HTML
 2. Minifies the resulting HTML

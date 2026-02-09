@@ -1,6 +1,14 @@
 # BlackMagic ESP32 Frontend
 
-Web interface for the BlackMagic ESP32 firmware flasher.
+Web interface for the BlackMagic ESP32 firmware flasher with drag & drop support.
+
+## Features
+
+- 📁 **Drag & Drop** - Simply drag firmware files (.bin, .elf) onto the upload area
+- 🖱️ **Click to Browse** - Traditional file selection also available
+- ✅ **File Validation** - Automatic validation of file types
+- 📊 **Upload Progress** - Real-time progress bar during upload
+- 🎯 **Flash Address** - Configurable flash base address
 
 ## Setup
 

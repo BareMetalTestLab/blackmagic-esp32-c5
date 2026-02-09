@@ -8,15 +8,20 @@
 </head>
 <body>
     <h1>BlackMagic Probe - Firmware Flash</h1>
-    <div class='upload-form'>
+    <div class='upload-form' id='uploadForm'>
         <h2>Select Firmware File</h2>
-        <form id='uploadForm' enctype='multipart/form-data'>
-            <input type='file' id='fileInput' name='file' accept='.bin,.elf' required>
+        <div class='drop-zone' id='dropZone'>
+            <div class='drop-zone-text'>📁 Drag & Drop firmware file here</div>
+            <div class='drop-zone-hint'>or click to browse</div>
+        </div>
+        <input type='file' id='fileInput' name='file' accept='.bin,.elf' style='display: none;'>
+        <div id='fileInfo' class='file-info' style='display: none;'></div>
+        <form id='uploadFormElement' enctype='multipart/form-data'>
             <div class='addr-input'>
                 <label for='baseAddr'>Flash Base Address (hex):</label>
                 <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
             </div>
-            <button type='submit' id='uploadBtn'>Upload & Flash Target</button>
+            <button type='submit' id='uploadBtn' disabled>Upload & Flash Target</button>
         </form>
         <div id='status'></div>
         <div class='progress' id='progressContainer' style='display:none;'>

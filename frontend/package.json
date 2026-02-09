@@ -4,8 +4,7 @@
   "description": "Web interface for BlackMagic ESP32 firmware flasher",
   "scripts": {
     "build": "node build.js",
-    "build:dev": "node build-dev.js",
-    "dev": "npm run build:dev && npx http-server . -p 8000 -o /dev.html -c-1"
+    "dev": "npx http-server src -p 8000 -o -c-1"
   },
   "devDependencies": {
     "html-minifier": "^4.0.0"

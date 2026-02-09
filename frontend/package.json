@@ -1,0 +1,12 @@
+{
+  "name": "blackmagic-esp32-frontend",
+  "version": "1.0.0",
+  "description": "Web interface for BlackMagic ESP32 firmware flasher",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "npx http-server src -p 8000 -o -c-1"
+  },
+  "devDependencies": {
+    "html-minifier": "^4.0.0"
+  }
+}

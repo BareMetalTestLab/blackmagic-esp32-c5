@@ -8,10 +8,7 @@
 #include "nvs_flash.h"
 #include "network.h"
 #include "network-gdb.h"
-
-#ifdef ENABLE_RTT
-#include "network-rtt.h"
-#endif
+#include "network-http.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -22,6 +19,7 @@
 #include "gdb-glue.h"
 
 #ifdef ENABLE_RTT
+#include "network-rtt.h"
 #include "rtt.h"
 #include "rtt_if_esp32.h"
 #endif
@@ -74,6 +72,7 @@ void app_main(void)
 
     network_init();
     network_gdb_server_init();
+    network_http_server_init();
     
 #ifdef ENABLE_RTT
     network_rtt_server_init();

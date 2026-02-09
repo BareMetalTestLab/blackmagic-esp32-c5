@@ -63,7 +63,7 @@ cd frontend
 npm run dev
 ```
 
-This starts a local server and automatically opens the testing page with mocked backend in your browser.
+This automatically generates a test version from your source files with mocked backend, starts a local server, and opens it in your browser. Any changes you make to `src/index.html` will be reflected when you restart the dev server.
 
 See [frontend/README.md](frontend/README.md) for more options.
 

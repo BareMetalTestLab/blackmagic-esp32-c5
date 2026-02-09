@@ -20,7 +20,12 @@ npm run build
 npm run dev
 ```
 
-This will start a local server and automatically open `dev.html` in your browser with mocked backend for testing.
+This will:
+1. Auto-generate `dev.html` from `src/index.html` with mocked backend
+2. Start a local server 
+3. Open the page in your browser
+
+**Note:** `dev.html` is auto-generated - don't edit it manually! Edit `src/index.html` instead, and `dev.html` will be regenerated automatically when you run `npm run dev`.
 
 Press `Ctrl+C` to stop the server.
 
@@ -41,19 +46,20 @@ After making changes to files in `src/`, you can either:
 
 To test the frontend independently without ESP32:
 
-**Recommended:** Just run `npm run dev` - opens dev.html with mocked backend automatically!
+**Recommended:** Just run `npm run dev` - automatically syncs `src/index.html` changes to dev version!
 
 Other options:
-1. **Manual test** - Open `dev.html` in your browser (works offline)
-2. **Test production build** - Open `dist/index.html` after running `npm run build`
+1. **Manual generation** - Run `npm run build:dev` to regenerate `dev.html` from sources
+2. **Test production build** - Run `npm run build` then open `dist/index.html`
 3. **Custom server** - Use Python (`python3 -m http.server 8000`) or any other HTTP server
 
 ## File Structure
 
-- `src/index.html` - Main HTML page
+- `src/index.html` - Main HTML page (edit this!)
 - `src/styles.css` - Styles
 - `src/app.js` - JavaScript functionality
 - `build.js` - Build script that generates C header
-- `dev.html` - Development testing page with mocked backend
+- `build-dev.js` - Script that generates dev.html from src/
+- `dev.html` - **Auto-generated** development testing page (don't edit!)
 - `dist/` - Build output (minified HTML and C header)
 - `dist/network-http-page.h` - Generated C header (auto-created)

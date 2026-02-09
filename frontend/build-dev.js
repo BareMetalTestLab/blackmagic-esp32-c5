@@ -1,11 +1,18 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>BlackMagic - Flash Firmware (DEV)</title>
-    <link rel="stylesheet" href="src/styles.css">
-    <style>
+const fs = require('fs');
+const path = require('path');
+
+const SRC_HTML = path.join(__dirname, 'src', 'index.html');
+const DEV_HTML = path.join(__dirname, 'dev.html');
+
+console.log('Generating dev.html from src/index.html...');
+
+// Read source HTML
+let html = fs.readFileSync(SRC_HTML, 'utf8');
+
+// Add dev banner and mock script
+html = html.replace(
+    '</head>',
+    `    <style>
         .dev-banner {
             background-color: #ff9800;
             color: white;
@@ -14,26 +21,18 @@
             font-weight: bold;
         }
     </style>
-</head>
-<body>
-    <div class="dev-banner">⚠️ DEVELOPMENT MODE - Backend is mocked</div>
-    <h1>BlackMagic Probe - Firmware Flash</h1>
-    <div class='upload-form'>
-        <h2>Select Firmware File</h2>
-        <form id='uploadForm' enctype='multipart/form-data'>
-            <input type='file' id='fileInput' name='file' accept='.bin,.elf' required>
-            <div class='addr-input'>
-                <label for='baseAddr'>Flash Base Address (hex):</label>
-                <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
-            </div>
-            <button type='submit' id='uploadBtn'>Upload & Flash Target</button>
-        </form>
-        <div id='status'></div>
-        <div class='progress' id='progressContainer' style='display:none;'>
-            <div class='progress-bar' id='progressBar'></div>
-        </div>
-    </div>
-    <script>
+</head>`
+);
+
+html = html.replace(
+    '<body>',
+    `<body>
+    <div class="dev-banner">⚠️ DEVELOPMENT MODE - Backend is mocked</div>`
+);
+
+html = html.replace(
+    '<script src="app.js"></script>',
+    `<script>
         // Development mode - mock backend by overriding form submission
         window.addEventListener('DOMContentLoaded', () => {
             const originalScript = document.createElement('script');
@@ -86,6 +85,16 @@
                 });
             };
         });
-    </script>
-</body>
-</html>
+    </script>`
+);
+
+html = html.replace('href="styles.css"', 'href="src/styles.css"');
+html = html.replace(
+    '<title>BlackMagic - Flash Firmware</title>',
+    '<title>BlackMagic - Flash Firmware (DEV)</title>'
+);
+
+// Write dev.html
+fs.writeFileSync(DEV_HTML, html);
+
+console.log('✓ dev.html generated successfully!');

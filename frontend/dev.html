@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>BlackMagic - Flash Firmware (DEV)</title>
+    <link rel="stylesheet" href="src/styles.css">
+    <style>
+        .dev-banner {
+            background-color: #ff9800;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="dev-banner">⚠️ DEVELOPMENT MODE - Backend is mocked</div>
+    <h1>BlackMagic Probe - Firmware Flash</h1>
+    <div class='upload-form'>
+        <h2>Select Firmware File</h2>
+        <form id='uploadForm' enctype='multipart/form-data'>
+            <input type='file' id='fileInput' name='file' accept='.bin,.elf' required>
+            <div class='addr-input'>
+                <label for='baseAddr'>Flash Base Address (hex):</label>
+                <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
+            </div>
+            <button type='submit' id='uploadBtn'>Upload & Flash Target</button>
+        </form>
+        <div id='status'></div>
+        <div class='progress' id='progressContainer' style='display:none;'>
+            <div class='progress-bar' id='progressBar'></div>
+        </div>
+    </div>
+    
+    <script>
+        // Development mode - mock backend
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const uploadBtn = document.getElementById('uploadBtn');
+            
+            if (!file) return;
+            
+            const status = document.getElementById('status');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            
+            uploadBtn.disabled = true;
+            status.textContent = 'Uploading ' + file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)...';
+            status.className = 'info';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            
+            // Simulate upload progress
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += 10;
+                progressBar.style.width = progress + '%';
+                status.textContent = 'Uploading... ' + progress + '%';
+                
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    status.textContent = '✓ Firmware flashed successfully (MOCKED)';
+                    status.className = 'success';
+                    uploadBtn.disabled = false;
+                }
+            }, 200);
+        });
+    </script>
+</body>
+</html>

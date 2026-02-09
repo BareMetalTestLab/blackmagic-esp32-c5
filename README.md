@@ -30,9 +30,42 @@ These settings are automatically applied from `sdkconfig.defaults` on first buil
 ### Build Commands
 
 ```bash
+# Build ESP32 firmware (frontend is built automatically)
 idf.py build
 idf.py flash monitor
 ```
+
+The frontend is automatically built during the ESP-IDF build process via a CMake custom command.
+
+## Frontend Development
+
+The web interface for firmware flashing is located in the `frontend/` directory:
+
+```bash
+cd frontend
+npm install       # Install dependencies (first time only)
+npm run build     # Build and generate C header file (optional - done automatically)
+```
+
+The build process:
+1. Inlines CSS and JavaScript into HTML
+2. Minifies the resulting HTML
+3. Generates `frontend/dist/network-http-page.h` with the page as a C string
+
+**Note**: The frontend is automatically rebuilt when you run `idf.py build` if any source files (`src/index.html`, `src/styles.css`, `src/app.js`) have changed. Manual rebuild is only needed for testing frontend changes independently.
+
+### Frontend Testing
+
+To test the web interface without flashing to ESP32:
+
+```bash
+cd frontend
+npm run dev
+```
+
+This starts a local server and automatically opens the testing page with mocked backend in your browser.
+
+See [frontend/README.md](frontend/README.md) for more options.
 
 ## Usage
 

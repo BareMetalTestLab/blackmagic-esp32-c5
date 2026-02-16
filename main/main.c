@@ -5,7 +5,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
+#include "nvs.h"
 #include "network.h"
 #include "network-gdb.h"
 #include "network-http.h"
@@ -61,14 +61,7 @@ void app_main(void)
 {
     gdb_glue_init();
 
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
+    nvs_init();
 
     network_init();
     network_gdb_server_init();

@@ -418,12 +418,6 @@ static httpd_handle_t start_webserver(void)
     return server;
 }
 
-static esp_err_t stop_webserver(httpd_handle_t server)
-{
-    // Stop the httpd server
-    return httpd_stop(server);
-}
-
 void network_http_server_init(void)
 {
     ESP_LOGI(TAG, "init http server");

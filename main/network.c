@@ -11,11 +11,10 @@
 #include <string.h>
 #include <lwip/apps/netbiosns.h>
 #include <mdns.h>
+#include "nvs-config.h"
 
 #define TAG "network"
 
-#define DEFAULT_WIFI_SSID CONFIG_ESP_WIFI_SSID
-#define DEFAULT_WIFI_PASS CONFIG_ESP_WIFI_PASSWORD
 #define DEFAULT_WIFI_CHANNEL CONFIG_ESP_WIFI_CHANNEL
 #define DEFAULT_MAX_STA_CONN CONFIG_ESP_MAX_STA_CONN
 
@@ -25,7 +24,6 @@
 #define DEFAULT_GTK_REKEY_INTERVAL 0
 #endif
 
-#define MDNS_HOST_NAME "blackmagic"
 #define MDNS_INSTANCE "blackmagic web server"
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -33,12 +31,14 @@ static EventGroupHandle_t s_wifi_event_group;
 
 void network_hostnames_init(void)
 {
+    mstring_t *hostname = mstring_alloc();
+    nvs_config_get_hostname(hostname);
 
     ESP_LOGI(TAG, "init mdns");
-    char *hostname = MDNS_HOST_NAME;
+
     mdns_init();
 
-    mdns_hostname_set(hostname);
+    mdns_hostname_set(mstring_get_cstr(hostname));
     mdns_instance_name_set(MDNS_INSTANCE);
 
     mdns_txt_item_t serviceTxtData[] = {{"board", "esp32"}, {"path", "/"}};
@@ -55,8 +55,10 @@ void network_hostnames_init(void)
 
     ESP_LOGI(TAG, "init netbios");
     netbiosns_init();
-    netbiosns_set_name(hostname);
+    netbiosns_set_name(mstring_get_cstr(hostname));
     ESP_LOGI(TAG, "init netbios done");
+
+    mstring_free(hostname);
 }
 
 static void wifi_ap_event_handler(void *arg, esp_event_base_t event_base,
@@ -96,7 +98,7 @@ static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-static void wifi_init_sta(void)
+static void wifi_init_sta(mstring_t *ssid, mstring_t *pass)
 {
     esp_netif_create_default_wifi_sta();
 
@@ -105,21 +107,19 @@ static void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_sta_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL));
 
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = DEFAULT_WIFI_SSID,
-            .password = DEFAULT_WIFI_PASS,
-        },
-    };
+    wifi_config_t wifi_config;
+
+    memcpy(wifi_config.sta.ssid, mstring_get_cstr(ssid), sizeof(wifi_config.sta.ssid));
+    memcpy(wifi_config.sta.password, mstring_get_cstr(pass), sizeof(wifi_config.sta.password));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "wifi_init_sta finished. SSID:%s password:%s", DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASS);
+    ESP_LOGI(TAG, "wifi_init_sta finished. SSID:%s password:%s", mstring_get_cstr(ssid), mstring_get_cstr(pass));
 }
 
-static void wifi_init_softap(void)
+static void wifi_init_softap(mstring_t *ssid, mstring_t *pass)
 {
     esp_netif_create_default_wifi_ap();
 
@@ -129,10 +129,8 @@ static void wifi_init_softap(void)
 
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = DEFAULT_WIFI_SSID,
-            .ssid_len = strlen(DEFAULT_WIFI_SSID),
+            .ssid_len = strlen(mstring_get_cstr(ssid)),
             .channel = DEFAULT_WIFI_CHANNEL,
-            .password = DEFAULT_WIFI_PASS,
             .max_connection = DEFAULT_MAX_STA_CONN,
 #ifdef CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT
             .authmode = WIFI_AUTH_WPA3_PSK,
@@ -152,7 +150,20 @@ static void wifi_init_softap(void)
             .gtk_rekey_interval = DEFAULT_GTK_REKEY_INTERVAL,
         },
     };
-    if (strlen(DEFAULT_WIFI_PASS) == 0)
+
+    memcpy(
+        &wifi_config.ap.ssid,
+        mstring_get_cstr(ssid),
+        MIN(sizeof(wifi_config.ap.ssid), mstring_size(ssid)));
+
+    memcpy(
+        &wifi_config.ap.password,
+        mstring_get_cstr(pass),
+        MIN(sizeof(wifi_config.ap.password), mstring_size(pass)));
+
+    wifi_config.ap.ssid_len = mstring_size(ssid);
+
+    if (mstring_size(pass) == 0)
     {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
@@ -162,11 +173,17 @@ static void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASS, DEFAULT_WIFI_CHANNEL);
+             mstring_get_cstr(ssid), mstring_get_cstr(pass), DEFAULT_WIFI_CHANNEL);
 }
 
 void network_init(void)
 {
+    mstring_t *ssid = mstring_alloc();
+    mstring_t *pass = mstring_alloc();
+
+    nvs_config_get_ssid(ssid);
+    nvs_config_get_pass(pass);
+
     s_wifi_event_group = xEventGroupCreate();
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
@@ -175,7 +192,7 @@ void network_init(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     network_hostnames_init();
-    wifi_init_sta();
+    wifi_init_sta(ssid, pass);
 
     ESP_LOGI(TAG, "Connecting to WiFi as STA...");
 
@@ -190,10 +207,13 @@ void network_init(void)
     {
         esp_wifi_stop();
         ESP_LOGW(TAG, "STA connect failed, switching to AP mode");
-        wifi_init_softap();
+        wifi_init_softap(ssid, pass);
     }
     else
     {
         ESP_LOGI(TAG, "Connected to AP as STA");
     }
+
+    mstring_free(ssid);
+    mstring_free(pass);
 }

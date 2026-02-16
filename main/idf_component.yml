@@ -11,3 +11,5 @@ dependencies:
   espressif/mdns: '*'
   esp32-platform:
     path: ../components/esp32-platform
+  m-string:
+    path: ../components/m-string

@@ -10,10 +10,23 @@
 #include <freertos/task.h>
 #include "gdb-glue.h"
 #include "network-http-page.h"
+#include "nvs-config.h"
+#include "m-string.h"
 
 #define TAG "network-http"
 #define FLASH_CHUNK_SIZE 4096      // Write in 4KB chunks for streaming
 #define FLASH_BASE_ADDR 0x08000000 // Default ARM Cortex-M flash base
+
+// Flash parameters structure
+typedef struct
+{
+    uint32_t base_addr;
+    // Add more parameters here in the future
+} flash_params_t;
+
+static flash_params_t flash_params = {
+    .base_addr = FLASH_BASE_ADDR,
+};
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
@@ -21,6 +34,49 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_send(req, html_page, HTTPD_RESP_USE_STRLEN);
 
     return ESP_OK;
+}
+
+/* Flash parameters configuration handler */
+static esp_err_t flash_params_post_handler(httpd_req_t *req)
+{
+    char content[256];
+    size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
+
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0)
+    {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+
+    // Parse URL-encoded form data
+    char base_addr_str[32] = {0};
+    if (httpd_query_key_value(content, "baseAddr", base_addr_str, sizeof(base_addr_str)) == ESP_OK)
+    {
+        uint32_t new_addr = strtoul(base_addr_str, NULL, 0);
+        if (new_addr != 0)
+        {
+            flash_params.base_addr = new_addr;
+            ESP_LOGI(TAG, "Flash parameters updated: base_addr=0x%08lX", flash_params.base_addr);
+
+            httpd_resp_set_type(req, "application/json");
+            char resp[128];
+            snprintf(resp, sizeof(resp),
+                     "{\"success\":true,\"baseAddr\":\"0x%08lX\"}",
+                     flash_params.base_addr);
+            httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid parameters\"}",
+                    HTTPD_RESP_USE_STRLEN);
+    return ESP_FAIL;
 }
 
 /* Helper to find pattern in buffer */
@@ -50,6 +106,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     bool success = false;
     bool headers_parsed = false;
     const char *error_msg = "Error: Flash operation failed";
+    uint32_t flash_base_addr = flash_params.base_addr; // Use stored parameters
 
     ESP_LOGI(TAG, "Starting streaming firmware flash, content size: %zu bytes", content_length);
 
@@ -106,6 +163,8 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
         error_msg = "Error: Invalid multipart format";
         goto cleanup_early;
     }
+
+    ESP_LOGI(TAG, "Using flash base address: 0x%08lX", flash_base_addr);
 
     // Calculate actual firmware size (exclude headers and trailing boundary)
     // Trailing boundary is typically ~50-100 bytes: \r\n------WebKitFormBoundary...\r\n
@@ -177,8 +236,8 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Target halted");
 
     // Step 5: Erase flash
-    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", FLASH_BASE_ADDR, firmware_size);
-    if (!target_flash_erase(target, FLASH_BASE_ADDR, firmware_size))
+    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", flash_base_addr, firmware_size);
+    if (!target_flash_erase(target, flash_base_addr, firmware_size))
     {
         ESP_LOGE(TAG, "Flash erase failed");
         goto cleanup;
@@ -232,7 +291,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
             (total_written + bytes_to_flash >= target_bytes_to_write))
         {
 
-            if (!target_flash_write(target, FLASH_BASE_ADDR + total_written,
+            if (!target_flash_write(target, flash_base_addr + total_written,
                                     chunk_buffer, bytes_to_flash))
             {
                 ESP_LOGE(TAG, "Flash write failed at offset %zu", total_written);
@@ -332,6 +391,131 @@ static const httpd_uri_t upload = {
     .method = HTTP_POST,
     .handler = upload_post_handler};
 
+static const httpd_uri_t flash_params_uri = {
+    .uri = "/flash-params",
+    .method = HTTP_POST,
+    .handler = flash_params_post_handler};
+
+/* NVS settings GET handler */
+static esp_err_t nvs_settings_get_handler(httpd_req_t *req)
+{
+    mstring_t *ssid = mstring_alloc();
+    mstring_t *pass = mstring_alloc();
+    mstring_t *hostname = mstring_alloc();
+
+    nvs_config_get_ssid(ssid);
+    nvs_config_get_pass(pass);
+    nvs_config_get_hostname(hostname);
+
+    char resp[512];
+    snprintf(resp, sizeof(resp),
+             "{\"ssid\":\"%s\",\"pass\":\"%s\",\"hostname\":\"%s\"}",
+             mstring_get_cstr(ssid),
+             mstring_get_cstr(pass),
+             mstring_get_cstr(hostname));
+
+    mstring_free(ssid);
+    mstring_free(pass);
+    mstring_free(hostname);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+
+    return ESP_OK;
+}
+
+/* NVS settings POST handler */
+static esp_err_t nvs_settings_post_handler(httpd_req_t *req)
+{
+    char content[512];
+    size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
+
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0)
+    {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+
+    // Parse URL-encoded form data
+    char ssid_str[64] = {0};
+    char pass_str[64] = {0};
+    char hostname_str[64] = {0};
+
+    bool has_updates = false;
+    mstring_t *ssid = mstring_alloc();
+    mstring_t *pass = mstring_alloc();
+    mstring_t *hostname = mstring_alloc();
+
+    if (httpd_query_key_value(content, "ssid", ssid_str, sizeof(ssid_str)) == ESP_OK)
+    {
+        mstring_set(ssid, ssid_str);
+        nvs_config_set_ssid(ssid);
+        has_updates = true;
+        ESP_LOGI(TAG, "SSID updated: %s", ssid_str);
+    }
+
+    if (httpd_query_key_value(content, "pass", pass_str, sizeof(pass_str)) == ESP_OK)
+    {
+        mstring_set(pass, pass_str);
+        nvs_config_set_pass(pass);
+        has_updates = true;
+        ESP_LOGI(TAG, "Password updated");
+    }
+
+    if (httpd_query_key_value(content, "hostname", hostname_str, sizeof(hostname_str)) == ESP_OK)
+    {
+        mstring_set(hostname, hostname_str);
+        nvs_config_set_hostname(hostname);
+        has_updates = true;
+        ESP_LOGI(TAG, "Hostname updated: %s", hostname_str);
+    }
+
+    mstring_free(ssid);
+    mstring_free(pass);
+    mstring_free(hostname);
+
+    httpd_resp_set_type(req, "application/json");
+    if (has_updates)
+    {
+        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    else
+    {
+        httpd_resp_send(req, "{\"success\":false,\"error\":\"No valid parameters\"}",
+                        HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+}
+
+static const httpd_uri_t nvs_settings_get_uri = {
+    .uri = "/nvs-settings",
+    .method = HTTP_GET,
+    .handler = nvs_settings_get_handler};
+
+static const httpd_uri_t nvs_settings_post_uri = {
+    .uri = "/nvs-settings",
+    .method = HTTP_POST,
+    .handler = nvs_settings_post_handler};
+
+/* Favicon handler to suppress 404 warnings */
+static esp_err_t favicon_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+static const httpd_uri_t favicon_uri = {
+    .uri = "/favicon.ico",
+    .method = HTTP_GET,
+    .handler = favicon_get_handler};
+
 static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -352,13 +536,11 @@ static httpd_handle_t start_webserver(void)
     ESP_LOGI(TAG, "Registering URI handlers");
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &upload);
+    httpd_register_uri_handler(server, &flash_params_uri);
+    httpd_register_uri_handler(server, &nvs_settings_get_uri);
+    httpd_register_uri_handler(server, &nvs_settings_post_uri);
+    httpd_register_uri_handler(server, &favicon_uri);
     return server;
-}
-
-static esp_err_t stop_webserver(httpd_handle_t server)
-{
-    // Stop the httpd server
-    return httpd_stop(server);
 }
 
 void network_http_server_init(void)

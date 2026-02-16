@@ -2,7 +2,7 @@
 set(FRONTEND_DIR "${CMAKE_SOURCE_DIR}/frontend")
 file(MAKE_DIRECTORY "${FRONTEND_DIR}/dist")
 
-idf_component_register(SRCS "network.c" "main.c" "network-gdb.c" "network-http.c" "network-rtt.c"
+idf_component_register(SRCS "nvs-config.c" "network.c" "main.c" "network-gdb.c" "network-http.c" "network-rtt.c" "nvs.c" "nvs-config.c"
                     PRIV_REQUIRES esp_wifi esp_https_server nvs_flash
                     INCLUDE_DIRS "." "${CMAKE_SOURCE_DIR}/frontend/dist")
 

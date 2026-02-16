@@ -16,11 +16,18 @@
         </div>
         <input type='file' id='fileInput' name='file' accept='.bin,.elf' style='display: none;'>
         <div id='fileInfo' class='file-info' style='display: none;'></div>
-        <form id='uploadFormElement' enctype='multipart/form-data'>
-            <div class='addr-input'>
-                <label for='baseAddr'>Flash Base Address (hex):</label>
-                <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
+        
+        <details id='advancedSettings' class='advanced-settings'>
+            <summary>Advanced Settings</summary>
+            <div class='settings-content'>
+                <div class='addr-input'>
+                    <label for='baseAddr'>Flash Base Address (hex):</label>
+                    <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
+                </div>
             </div>
+        </details>
+        
+        <form id='uploadFormElement' enctype='multipart/form-data'>
             <button type='submit' id='uploadBtn' disabled>Upload & Flash Target</button>
         </form>
         <div id='status'></div>

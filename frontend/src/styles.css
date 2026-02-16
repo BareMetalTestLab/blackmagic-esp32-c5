@@ -141,3 +141,32 @@ button:disabled {
     background-color: #4CAF50;
     transition: width 0.3s;
 }
+
+.advanced-settings {
+    margin: 20px 0;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 10px;
+    background-color: #f9f9f9;
+}
+
+.advanced-settings summary {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 5px;
+    user-select: none;
+    color: #666;
+}
+
+.advanced-settings summary:hover {
+    color: #333;
+}
+
+.advanced-settings[open] summary {
+    color: #4CAF50;
+    margin-bottom: 15px;
+}
+
+.settings-content {
+    padding: 10px 5px;
+}

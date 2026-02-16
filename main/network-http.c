@@ -15,12 +15,66 @@
 #define FLASH_CHUNK_SIZE 4096      // Write in 4KB chunks for streaming
 #define FLASH_BASE_ADDR 0x08000000 // Default ARM Cortex-M flash base
 
+// Flash parameters structure
+typedef struct
+{
+    uint32_t base_addr;
+    // Add more parameters here in the future
+} flash_params_t;
+
+static flash_params_t flash_params = {
+    .base_addr = FLASH_BASE_ADDR,
+};
+
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html_page, HTTPD_RESP_USE_STRLEN);
 
     return ESP_OK;
+}
+
+/* Flash parameters configuration handler */
+static esp_err_t flash_params_post_handler(httpd_req_t *req)
+{
+    char content[256];
+    size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
+
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0)
+    {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+
+    // Parse URL-encoded form data
+    char base_addr_str[32] = {0};
+    if (httpd_query_key_value(content, "baseAddr", base_addr_str, sizeof(base_addr_str)) == ESP_OK)
+    {
+        uint32_t new_addr = strtoul(base_addr_str, NULL, 0);
+        if (new_addr != 0)
+        {
+            flash_params.base_addr = new_addr;
+            ESP_LOGI(TAG, "Flash parameters updated: base_addr=0x%08lX", flash_params.base_addr);
+
+            httpd_resp_set_type(req, "application/json");
+            char resp[128];
+            snprintf(resp, sizeof(resp),
+                     "{\"success\":true,\"baseAddr\":\"0x%08lX\"}",
+                     flash_params.base_addr);
+            httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid parameters\"}",
+                    HTTPD_RESP_USE_STRLEN);
+    return ESP_FAIL;
 }
 
 /* Helper to find pattern in buffer */
@@ -50,6 +104,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     bool success = false;
     bool headers_parsed = false;
     const char *error_msg = "Error: Flash operation failed";
+    uint32_t flash_base_addr = flash_params.base_addr; // Use stored parameters
 
     ESP_LOGI(TAG, "Starting streaming firmware flash, content size: %zu bytes", content_length);
 
@@ -106,6 +161,8 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
         error_msg = "Error: Invalid multipart format";
         goto cleanup_early;
     }
+
+    ESP_LOGI(TAG, "Using flash base address: 0x%08lX", flash_base_addr);
 
     // Calculate actual firmware size (exclude headers and trailing boundary)
     // Trailing boundary is typically ~50-100 bytes: \r\n------WebKitFormBoundary...\r\n
@@ -177,8 +234,8 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Target halted");
 
     // Step 5: Erase flash
-    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", FLASH_BASE_ADDR, firmware_size);
-    if (!target_flash_erase(target, FLASH_BASE_ADDR, firmware_size))
+    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", flash_base_addr, firmware_size);
+    if (!target_flash_erase(target, flash_base_addr, firmware_size))
     {
         ESP_LOGE(TAG, "Flash erase failed");
         goto cleanup;
@@ -232,7 +289,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
             (total_written + bytes_to_flash >= target_bytes_to_write))
         {
 
-            if (!target_flash_write(target, FLASH_BASE_ADDR + total_written,
+            if (!target_flash_write(target, flash_base_addr + total_written,
                                     chunk_buffer, bytes_to_flash))
             {
                 ESP_LOGE(TAG, "Flash write failed at offset %zu", total_written);
@@ -332,6 +389,11 @@ static const httpd_uri_t upload = {
     .method = HTTP_POST,
     .handler = upload_post_handler};
 
+static const httpd_uri_t flash_params_uri = {
+    .uri = "/flash-params",
+    .method = HTTP_POST,
+    .handler = flash_params_post_handler};
+
 static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -352,6 +414,7 @@ static httpd_handle_t start_webserver(void)
     ESP_LOGI(TAG, "Registering URI handlers");
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &upload);
+    httpd_register_uri_handler(server, &flash_params_uri);
     return server;
 }
 

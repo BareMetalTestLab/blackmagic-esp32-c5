@@ -56,7 +56,7 @@ dropZone.addEventListener('drop', (e) => {
 }, false);
 
 function handleFile(file) {
-    const validTypes = ['.bin', '.elf'];
+    const validTypes = ['.bin'];
     const fileExt = '.' + file.name.split('.').pop().toLowerCase();
     
     if (!validTypes.includes(fileExt)) {
@@ -73,6 +73,14 @@ function handleFile(file) {
     fileInfo.style.backgroundColor = '#e6f7e6';
     fileInfo.style.color = '#2d5016';
     uploadBtn.disabled = false;
+    
+    // Auto-upload if advanced settings are closed
+    const advancedSettings = document.getElementById('advancedSettings');
+    if (!advancedSettings.open) {
+        setTimeout(() => {
+            document.getElementById('uploadFormElement').dispatchEvent(new Event('submit'));
+        }, 500);
+    }
 }
 
 document.getElementById('uploadFormElement').addEventListener('submit', async (e) => {
@@ -87,10 +95,52 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
     const progressBar = document.getElementById('progressBar');
     
     uploadBtn.disabled = true;
-    status.textContent = 'Uploading ' + file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)...';
-    status.className = 'info';
     progressContainer.style.display = 'block';
     progressBar.style.width = '0%';
+    
+    // Step 1: Always send flash parameters before upload
+    status.textContent = 'Setting flash parameters...';
+    status.className = 'info';
+    
+    const baseAddr = document.getElementById('baseAddr').value;
+    
+    try {
+        const paramsResponse = await fetch('/flash-params', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'baseAddr=' + encodeURIComponent(baseAddr)
+        });
+        
+        if (!paramsResponse.ok) {
+            const errorText = await paramsResponse.text();
+            status.textContent = '✗ Failed to set parameters: ' + errorText;
+            status.className = 'error';
+            uploadBtn.disabled = false;
+            return;
+        }
+        
+        const result = await paramsResponse.json();
+        if (!result.success) {
+            status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
+            status.className = 'error';
+            uploadBtn.disabled = false;
+            return;
+        }
+        
+        console.log('Flash parameters set:', result);
+        progressBar.style.width = '5%';
+    } catch (error) {
+        status.textContent = '✗ Failed to set parameters: ' + error.message;
+        status.className = 'error';
+        uploadBtn.disabled = false;
+        return;
+    }
+    
+    // Step 2: Upload firmware file
+    status.textContent = 'Uploading ' + file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)...';
+    status.className = 'info';
     
     const formData = new FormData();
     formData.append('file', file);

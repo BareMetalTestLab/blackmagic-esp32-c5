@@ -1,3 +1,6 @@
 [submodule "components/blackmagic"]
 	path = components/blackmagic
 	url = https://github.com/blackmagic-debug/blackmagic.git
+[submodule "components/mlib"]
+	path = components/mlib
+	url = https://github.com/P-p-H-d/mlib.git

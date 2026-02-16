@@ -7,34 +7,71 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h1>BlackMagic Probe - Firmware Flash</h1>
-    <div class='upload-form' id='uploadForm'>
-        <h2>Select Firmware File</h2>
-        <div class='drop-zone' id='dropZone'>
-            <div class='drop-zone-text'>📁 Drag & Drop firmware file here</div>
-            <div class='drop-zone-hint'>or click to browse</div>
-        </div>
-        <input type='file' id='fileInput' name='file' accept='.bin,.elf' style='display: none;'>
-        <div id='fileInfo' class='file-info' style='display: none;'></div>
-        
-        <details id='advancedSettings' class='advanced-settings'>
-            <summary>Advanced Settings</summary>
-            <div class='settings-content'>
-                <div class='addr-input'>
-                    <label for='baseAddr'>Flash Base Address (hex):</label>
-                    <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
-                </div>
+    <h1>BlackMagic Probe</h1>
+    
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab-button active" data-tab="flash">📥 Flash Firmware</button>
+        <button class="tab-button" data-tab="settings">⚙️ Settings</button>
+    </div>
+    
+    <!-- Flash Tab Content -->
+    <div class="tab-content active" id="flash-tab">
+        <div class='upload-form' id='uploadForm'>
+            <h2>Select Firmware File</h2>
+            <div class='drop-zone' id='dropZone'>
+                <div class='drop-zone-text'>📁 Drag & Drop firmware file here</div>
+                <div class='drop-zone-hint'>or click to browse</div>
             </div>
-        </details>
-        
-        <form id='uploadFormElement' enctype='multipart/form-data'>
-            <button type='submit' id='uploadBtn' disabled>Upload & Flash Target</button>
-        </form>
-        <div id='status'></div>
-        <div class='progress' id='progressContainer' style='display:none;'>
-            <div class='progress-bar' id='progressBar'></div>
+            <input type='file' id='fileInput' name='file' accept='.bin,.elf' style='display: none;'>
+            <div id='fileInfo' class='file-info' style='display: none;'></div>
+            
+            <details id='advancedSettings' class='advanced-settings'>
+                <summary>Advanced Settings</summary>
+                <div class='settings-content'>
+                    <div class='addr-input'>
+                        <label for='baseAddr'>Flash Base Address (hex):</label>
+                        <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
+                    </div>
+                </div>
+            </details>
+            
+            <form id='uploadFormElement' enctype='multipart/form-data'>
+                <button type='submit' id='uploadBtn' disabled>Upload & Flash Target</button>
+            </form>
+            <div id='status'></div>
+            <div class='progress' id='progressContainer' style='display:none;'>
+                <div class='progress-bar' id='progressBar'></div>
+            </div>
         </div>
     </div>
+    
+    <!-- Settings Tab Content -->
+    <div class="tab-content" id="settings-tab">
+        <div class='settings-form'>
+            <h2>NVS Configuration</h2>
+            <form id='settingsForm'>
+                <div class='form-group'>
+                    <label for='ssid'>Wi-Fi SSID:</label>
+                    <input type='text' id='ssid' name='ssid' placeholder='Enter Wi-Fi SSID'>
+                </div>
+                
+                <div class='form-group'>
+                    <label for='pass'>Wi-Fi Password:</label>
+                    <input type='password' id='pass' name='pass' placeholder='Enter Wi-Fi Password'>
+                </div>
+                
+                <div class='form-group'>
+                    <label for='hostname'>Hostname:</label>
+                    <input type='text' id='hostname' name='hostname' placeholder='Enter hostname'>
+                </div>
+                
+                <button type='submit' id='saveSettingsBtn'>Save Settings</button>
+            </form>
+            <div id='settingsStatus'></div>
+        </div>
+    </div>
+    
     <script src="app.js"></script>
 </body>
 </html>

@@ -182,3 +182,120 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
         uploadBtn.disabled = false;
     }
 });
+
+// Tab switching functionality
+const tabButtons = document.querySelectorAll('.tab-button');
+const tabContents = document.querySelectorAll('.tab-content');
+
+tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const targetTab = button.getAttribute('data-tab');
+        
+        // Remove active class from all buttons and contents
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        tabContents.forEach(content => content.classList.remove('active'));
+        
+        // Add active class to clicked button and corresponding content
+        button.classList.add('active');
+        document.getElementById(targetTab + '-tab').classList.add('active');
+    });
+});
+
+// Settings form functionality
+const settingsForm = document.getElementById('settingsForm');
+const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+const settingsStatus = document.getElementById('settingsStatus');
+
+// Load current settings function
+async function loadSettings() {
+    settingsStatus.textContent = 'Loading settings...';
+    settingsStatus.className = 'info';
+    
+    try {
+        const response = await fetch('/nvs-settings');
+        
+        if (!response.ok) {
+            throw new Error('Failed to load settings');
+        }
+        
+        const data = await response.json();
+        
+        document.getElementById('ssid').value = data.ssid || '';
+        document.getElementById('pass').value = data.pass || '';
+        document.getElementById('hostname').value = data.hostname || '';
+        
+        settingsStatus.textContent = '✓ Settings loaded successfully';
+        settingsStatus.className = 'success';
+        
+        setTimeout(() => {
+            settingsStatus.textContent = '';
+            settingsStatus.className = '';
+        }, 3000);
+        
+    } catch (error) {
+        settingsStatus.textContent = '✗ Error loading settings: ' + error.message;
+        settingsStatus.className = 'error';
+    }
+}
+
+// Save settings
+settingsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const ssid = document.getElementById('ssid').value;
+    const pass = document.getElementById('pass').value;
+    const hostname = document.getElementById('hostname').value;
+    
+    settingsStatus.textContent = 'Saving settings...';
+    settingsStatus.className = 'info';
+    saveSettingsBtn.disabled = true;
+    
+    try {
+        const params = new URLSearchParams();
+        if (ssid) params.append('ssid', ssid);
+        if (pass) params.append('pass', pass);
+        if (hostname) params.append('hostname', hostname);
+        
+        const response = await fetch('/nvs-settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params.toString()
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to save settings');
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            settingsStatus.textContent = '✓ Settings saved successfully! Restart device to apply changes.';
+            settingsStatus.className = 'success';
+            
+            // Reload settings to verify
+            setTimeout(() => {
+                loadSettings();
+            }, 2000);
+        } else {
+            settingsStatus.textContent = '✗ ' + (result.error || 'Failed to save settings');
+            settingsStatus.className = 'error';
+        }
+        
+    } catch (error) {
+        settingsStatus.textContent = '✗ Error saving settings: ' + error.message;
+        settingsStatus.className = 'error';
+    } finally {
+        saveSettingsBtn.disabled = false;
+    }
+});
+
+// Auto-load settings when settings tab is opened
+tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        if (button.getAttribute('data-tab') === 'settings') {
+            loadSettings();
+        }
+    });
+});

@@ -108,6 +108,7 @@ static void wifi_init_sta(mstring_t *ssid, mstring_t *pass)
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL));
 
     wifi_config_t wifi_config;
+    memset(&wifi_config, 0, sizeof(wifi_config_t));
 
     memcpy(wifi_config.sta.ssid, mstring_get_cstr(ssid), sizeof(wifi_config.sta.ssid));
     memcpy(wifi_config.sta.password, mstring_get_cstr(pass), sizeof(wifi_config.sta.password));
@@ -207,6 +208,8 @@ void network_init(void)
     {
         esp_wifi_stop();
         ESP_LOGW(TAG, "STA connect failed, switching to AP mode");
+        mstring_set(ssid, "blackmagic");
+        mstring_set(pass, "blackmagic");
         wifi_init_softap(ssid, pass);
     }
     else

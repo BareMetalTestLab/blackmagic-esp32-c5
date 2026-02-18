@@ -196,11 +196,11 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
         ESP_LOGI(TAG, "Target found via SWD");
         target_found = true;
     }
-    else if (jtag_scan())
-    {
-        ESP_LOGI(TAG, "Target found via JTAG");
-        target_found = true;
-    }
+    // else if (jtag_scan())
+    // {
+    //     ESP_LOGI(TAG, "Target found via JTAG");
+    //     target_found = true;
+    // }
 
     if (!target_found)
     {

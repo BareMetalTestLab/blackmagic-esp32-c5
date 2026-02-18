@@ -3,6 +3,7 @@
 #include "esp_event.h"
 #include <esp_log.h>
 #include <esp_wifi.h>
+#include <esp_system.h>
 #include <sys/param.h>
 #include <target.h>
 #include <string.h>
@@ -516,6 +517,28 @@ static const httpd_uri_t favicon_uri = {
     .method = HTTP_GET,
     .handler = favicon_get_handler};
 
+/* Reboot handler */
+static esp_err_t reboot_post_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Reboot request received");
+    
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    
+    // Delay to allow response to be sent
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    ESP_LOGI(TAG, "Rebooting device...");
+    esp_restart();
+    
+    return ESP_OK;
+}
+
+static const httpd_uri_t reboot_uri = {
+    .uri = "/reboot",
+    .method = HTTP_POST,
+    .handler = reboot_post_handler};
+
 static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -540,6 +563,7 @@ static httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &nvs_settings_get_uri);
     httpd_register_uri_handler(server, &nvs_settings_post_uri);
     httpd_register_uri_handler(server, &favicon_uri);
+    httpd_register_uri_handler(server, &reboot_uri);
     return server;
 }
 

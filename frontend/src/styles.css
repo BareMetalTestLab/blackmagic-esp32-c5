@@ -3,6 +3,44 @@ body {
     max-width: 700px;
     margin: 50px auto;
     padding: 20px;
+    position: relative;
+}
+
+.reboot-btn {
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background-color: #ff6b6b;
+    color: white;
+    border: 2px solid #ee5555;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.reboot-btn:hover {
+    background-color: #ee5555;
+    transform: scale(1.1) rotate(180deg);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
+}
+
+.reboot-btn:active {
+    transform: scale(0.95) rotate(180deg);
+}
+
+.reboot-btn:disabled {
+    background-color: #ccc;
+    border-color: #aaa;
+    cursor: not-allowed;
+    transform: none;
 }
 
 h1 {

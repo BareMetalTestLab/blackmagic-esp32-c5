@@ -5,6 +5,38 @@ const fileInfo = document.getElementById('fileInfo');
 const uploadBtn = document.getElementById('uploadBtn');
 const uploadFormElement = document.getElementById('uploadFormElement');
 const uploadFormDiv = document.getElementById('uploadForm');
+const rebootBtn = document.getElementById('rebootBtn');
+
+// Reboot button functionality
+rebootBtn.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to reboot the device?')) {
+        rebootBtn.disabled = true;
+        rebootBtn.textContent = '⏳';
+        
+        try {
+            const response = await fetch('/reboot', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                alert('Device is rebooting...');
+                // Optionally reload page after some delay
+                setTimeout(() => {
+                    window.location.reload();
+                }, 5000);
+            } else {
+                alert('Failed to reboot device');
+                rebootBtn.disabled = false;
+                rebootBtn.textContent = '🔄';
+            }
+        } catch (error) {
+            console.error('Reboot error:', error);
+            alert('Error communicating with device');
+            rebootBtn.disabled = false;
+            rebootBtn.textContent = '🔄';
+        }
+    }
+});
 
 // Click to browse
 dropZone.addEventListener('click', () => {

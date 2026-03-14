@@ -17,6 +17,40 @@ uint32_t target_clk_divider = 0;
 
 // static const char* TAG = "gdb-platform";
 
+void platform_jtag_pins_init(void)
+{
+    uint32_t output_mask = 0;
+
+#if TMS_PIN >= 0
+    output_mask |= (1U << TMS_PIN);
+#endif
+#if TDI_PIN >= 0
+    output_mask |= (1U << TDI_PIN);
+#endif
+#if TCK_PIN >= 0
+    output_mask |= (1U << TCK_PIN);
+#endif
+
+    if (output_mask != 0) {
+        GPIO.enable_w1ts.val = output_mask;
+    }
+
+#if TDO_PIN >= 0
+    gpio_ll_output_disable(&GPIO, TDO_PIN);
+    gpio_ll_input_enable(&GPIO, TDO_PIN);
+#endif
+
+#if TMS_PIN >= 0
+    esp_rom_gpio_connect_out_signal(TMS_PIN, SIG_GPIO_OUT_IDX, false, false);
+#endif
+#if TDI_PIN >= 0
+    esp_rom_gpio_connect_out_signal(TDI_PIN, SIG_GPIO_OUT_IDX, false, false);
+#endif
+#if TCK_PIN >= 0
+    esp_rom_gpio_connect_out_signal(TCK_PIN, SIG_GPIO_OUT_IDX, false, false);
+#endif
+}
+
 void __attribute__((always_inline)) platform_swdio_mode_float(void)
 {
     gpio_ll_output_disable(&GPIO, SWDIO_PIN);

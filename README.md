@@ -82,6 +82,21 @@ See [frontend/README.md](frontend/README.md) for more options.
 `$ monitor swdp_scan`
 `$ attach 1`
 
+## ESP32-C5 Debug Pin Mapping
+
+Default debug pin mapping used by the ESP32 platform port (`components/esp32-platform/platform.h`):
+
+| Signal | GPIO |
+| --- | --- |
+| SWDIO / TMS | 23 |
+| SWCLK / TCK | 24 |
+| TDI | 19 |
+| TDO / TRACESWO | 18 |
+
+Notes:
+- SWD and JTAG share the SWDIO/TMS and SWCLK/TCK lines, following common Black Magic platform style.
+- Update these values in `components/esp32-platform/platform.h` if your board wiring is different.
+
 ## RTT Support
 To enable RTT support, ensure the following:
 1. In `CMakeLists.txt`, add the definition `-DENABLE_RTT=1`.

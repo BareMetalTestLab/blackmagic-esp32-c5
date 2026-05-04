@@ -145,6 +145,16 @@ input[type='file'] {
     font-size: 15px;
 }
 
+.pin-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 24px;
+}
+
+.pin-grid .form-group input[type='number'] {
+    width: 80px;
+}
+
 button {
     background-color: #4CAF50;
     color: white;

@@ -86,6 +86,36 @@
             </form>
             <div id='settingsStatus'></div>
         </div>
+
+        <div class='settings-form' style='margin-top:24px;'>
+            <h2>Pin Configuration</h2>
+            <form id='pinsForm'>
+                <div class='pin-grid'>
+                    <div class='form-group'>
+                        <label for='pinSwdio'>SWDIO / TMS:</label>
+                        <input type='number' id='pinSwdio' name='swdio' min='0' max='30' value='23'>
+                    </div>
+                    <div class='form-group'>
+                        <label for='pinSwclk'>SWCLK / TCK:</label>
+                        <input type='number' id='pinSwclk' name='swclk' min='0' max='30' value='24'>
+                    </div>
+                    <div class='form-group'>
+                        <label for='pinTdi'>TDI:</label>
+                        <input type='number' id='pinTdi' name='tdi' min='0' max='30' value='28'>
+                    </div>
+                    <div class='form-group'>
+                        <label for='pinTdo'>TDO / SWO:</label>
+                        <input type='number' id='pinTdo' name='tdo' min='0' max='30' value='27'>
+                    </div>
+                    <div class='form-group'>
+                        <label for='pinTrst'>TRST:</label>
+                        <input type='number' id='pinTrst' name='trst' min='0' max='30' value='25'>
+                    </div>
+                </div>
+                <button type='submit' id='savePinsBtn'>Save Pins</button>
+            </form>
+            <div id='pinsStatus'></div>
+        </div>
     </div>
     
     <script src="app.js"></script>

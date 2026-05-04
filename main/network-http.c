@@ -13,6 +13,7 @@
 #include "network-http-page.h"
 #include "nvs-config.h"
 #include "m-string.h"
+#include "platform.h"
 
 #define TAG "network-http"
 #define FLASH_CHUNK_SIZE 4096      // Write in 4KB chunks for streaming
@@ -554,6 +555,71 @@ static const httpd_uri_t reboot_uri = {
     .method = HTTP_POST,
     .handler = reboot_post_handler};
 
+/* Pins GET handler */
+static esp_err_t pins_get_handler(httpd_req_t *req)
+{
+    char resp[256];
+    snprintf(resp, sizeof(resp),
+             "{\"swdio\":%ld,\"swclk\":%ld,\"tdi\":%ld,\"tdo\":%ld,\"trst\":%ld}",
+             (long)g_pin_swdio, (long)g_pin_swclk,
+             (long)g_pin_tdi, (long)g_pin_tdo, (long)g_pin_trst);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+/* Pins POST handler */
+static esp_err_t pins_post_handler(httpd_req_t *req)
+{
+    char content[256];
+    size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
+
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0)
+    {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+            httpd_resp_send_408(req);
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+
+    char val[8];
+    int32_t swdio = g_pin_swdio, swclk = g_pin_swclk;
+    int32_t tdi = g_pin_tdi, tdo = g_pin_tdo, trst = g_pin_trst;
+
+    if (httpd_query_key_value(content, "swdio", val, sizeof(val)) == ESP_OK) swdio = (int32_t)atoi(val);
+    if (httpd_query_key_value(content, "swclk", val, sizeof(val)) == ESP_OK) swclk = (int32_t)atoi(val);
+    if (httpd_query_key_value(content, "tdi",   val, sizeof(val)) == ESP_OK) tdi   = (int32_t)atoi(val);
+    if (httpd_query_key_value(content, "tdo",   val, sizeof(val)) == ESP_OK) tdo   = (int32_t)atoi(val);
+    if (httpd_query_key_value(content, "trst",  val, sizeof(val)) == ESP_OK) trst  = (int32_t)atoi(val);
+
+    nvs_config_set_pins(swdio, swclk, tdi, tdo, trst);
+
+    // Apply immediately
+    g_pin_swdio = swdio;
+    g_pin_swclk = swclk;
+    g_pin_tdi   = tdi;
+    g_pin_tdo   = tdo;
+    g_pin_trst  = trst;
+
+    ESP_LOGI(TAG, "Pins updated: SWDIO=%ld SWCLK=%ld TDI=%ld TDO=%ld TRST=%ld",
+             (long)swdio, (long)swclk, (long)tdi, (long)tdo, (long)trst);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static const httpd_uri_t pins_get_uri = {
+    .uri = "/pins",
+    .method = HTTP_GET,
+    .handler = pins_get_handler};
+
+static const httpd_uri_t pins_post_uri = {
+    .uri = "/pins",
+    .method = HTTP_POST,
+    .handler = pins_post_handler};
+
 static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -562,6 +628,7 @@ static httpd_handle_t start_webserver(void)
     ESP_LOGI(TAG, "Starting server");
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
+    conf.max_uri_handlers = 12;
 
     esp_err_t ret = httpd_start(&server, &conf);
     if (ESP_OK != ret)
@@ -579,6 +646,8 @@ static httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &nvs_settings_post_uri);
     httpd_register_uri_handler(server, &favicon_uri);
     httpd_register_uri_handler(server, &reboot_uri);
+    httpd_register_uri_handler(server, &pins_get_uri);
+    httpd_register_uri_handler(server, &pins_post_uri);
     return server;
 }
 

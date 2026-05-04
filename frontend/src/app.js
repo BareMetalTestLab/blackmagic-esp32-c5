@@ -241,8 +241,8 @@ const settingsStatus = document.getElementById('settingsStatus');
 
 // Load current settings function
 async function loadSettings() {
-    settingsStatus.textContent = 'Loading settings...';
-    settingsStatus.className = 'info';
+    settingsStatus.textContent = '';
+    settingsStatus.className = '';
     
     try {
         const response = await fetch('/nvs-settings');
@@ -257,13 +257,8 @@ async function loadSettings() {
         document.getElementById('pass').value = data.pass || '';
         document.getElementById('hostname').value = data.hostname || '';
         
-        settingsStatus.textContent = '✓ Settings loaded successfully';
-        settingsStatus.className = 'success';
-        
-        setTimeout(() => {
-            settingsStatus.textContent = '';
-            settingsStatus.className = '';
-        }, 3000);
+        settingsStatus.textContent = '';
+        settingsStatus.className = '';
         
     } catch (error) {
         settingsStatus.textContent = '✗ Error loading settings: ' + error.message;
@@ -329,6 +324,69 @@ tabButtons.forEach(button => {
     button.addEventListener('click', () => {
         if (button.getAttribute('data-tab') === 'settings') {
             loadSettings();
+            loadPins();
         }
     });
+});
+
+// Pins form functionality
+const pinsForm = document.getElementById('pinsForm');
+const pinsStatus = document.getElementById('pinsStatus');
+
+async function loadPins() {
+    try {
+        const response = await fetch('/pins');
+        if (!response.ok) throw new Error('Failed to load pins');
+        const data = await response.json();
+
+        document.getElementById('pinSwdio').value = data.swdio;
+        document.getElementById('pinSwclk').value = data.swclk;
+        document.getElementById('pinTdi').value   = data.tdi;
+        document.getElementById('pinTdo').value   = data.tdo;
+        document.getElementById('pinTrst').value  = data.trst;
+    } catch (error) {
+        console.error('Error loading pins:', error);
+    }
+}
+
+pinsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const savePinsBtn = document.getElementById('savePinsBtn');
+    pinsStatus.textContent = 'Saving pins...';
+    pinsStatus.className = 'info';
+    savePinsBtn.disabled = true;
+
+    try {
+        const params = new URLSearchParams({
+            swdio: document.getElementById('pinSwdio').value,
+            swclk: document.getElementById('pinSwclk').value,
+            tdi:   document.getElementById('pinTdi').value,
+            tdo:   document.getElementById('pinTdo').value,
+            trst:  document.getElementById('pinTrst').value,
+        });
+
+        const response = await fetch('/pins', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString()
+        });
+
+        if (!response.ok) throw new Error('Failed to save pins');
+        const result = await response.json();
+
+        if (result.success) {
+            pinsStatus.textContent = '✓ Pins saved successfully!';
+            pinsStatus.className = 'success';
+        } else {
+            pinsStatus.textContent = '✗ ' + (result.error || 'Failed to save pins');
+            pinsStatus.className = 'error';
+        }
+    } catch (error) {
+        pinsStatus.textContent = '✗ Error: ' + error.message;
+        pinsStatus.className = 'error';
+    } finally {
+        document.getElementById('savePinsBtn').disabled = false;
+        setTimeout(() => { pinsStatus.textContent = ''; pinsStatus.className = ''; }, 4000);
+    }
 });

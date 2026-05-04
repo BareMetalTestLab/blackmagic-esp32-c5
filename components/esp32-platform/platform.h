@@ -38,11 +38,20 @@ void led_set_blue(uint8_t value);
 
 // ON ESP32 we dont have the PORTS, this is dummy value until code is corrected
 #define SWCLK_PORT (0)
-#define SWCLK_PIN (24)
-#define SWDIO_PIN (23)
+#define SWDIO_PORT SWCLK_PORT
 
 #undef PLATFORM_HAS_TRACESWO
-#define TRACESWO_PIN 27
+
+/* Runtime-configurable pin numbers (set before first use, default values in platform.c) */
+extern int32_t g_pin_swdio;
+extern int32_t g_pin_swclk;
+extern int32_t g_pin_tdi;
+extern int32_t g_pin_tdo;
+extern int32_t g_pin_trst;
+
+#define SWDIO_PIN   (g_pin_swdio)
+#define SWCLK_PIN   (g_pin_swclk)
+#define TRACESWO_PIN (g_pin_tdo)
 
 /* Keep Black Magic style aliases: SWDIO/TMS and SWCLK/TCK share lines. */
 #define TMS_PORT   SWDIO_PORT
@@ -50,18 +59,13 @@ void led_set_blue(uint8_t value);
 #define TDO_PORT   SWDIO_PORT
 #define TCK_PORT   SWDIO_PORT
 #define TRST_PORT  SWDIO_PORT
-#define SWDIO_PORT SWCLK_PORT
 
-/* Default 4-wire JTAG mapping, adjust for your board wiring. */
-#define TMS_PIN (SWDIO_PIN)
-#define TDI_PIN (28)
-#define TDO_PIN (TRACESWO_PIN)
-#define TCK_PIN (SWCLK_PIN)
-#define TRST_PIN (25)
-
-#if SWDIO_PIN >= 32 || SWCLK_PIN >= 32 || TMS_PIN >= 32 || TDI_PIN >= 32 || TDO_PIN >= 32 || TCK_PIN >= 32
-#error To support pins greater than 31, change the platform_gpio functions
-#endif
+/* 4-wire JTAG mapping — aliases of the runtime globals above */
+#define TMS_PIN  (g_pin_swdio)
+#define TDI_PIN  (g_pin_tdi)
+#define TDO_PIN  (g_pin_tdo)
+#define TCK_PIN  (g_pin_swclk)
+#define TRST_PIN (g_pin_trst)
 
 #define gpio_set_val(port, pin, value)       \
     do                                       \

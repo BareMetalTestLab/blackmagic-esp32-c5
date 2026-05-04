@@ -15,40 +15,35 @@
 uint32_t swd_delay_cnt = 0;
 uint32_t target_clk_divider = 0;
 
+/* Default pin assignments — can be overridden at runtime via nvs-config */
+int32_t g_pin_swdio = 23;
+int32_t g_pin_swclk = 24;
+int32_t g_pin_tdi   = 28;
+int32_t g_pin_tdo   = 27;
+int32_t g_pin_trst  = 25;
+
 // static const char* TAG = "gdb-platform";
 
 void platform_jtag_pins_init(void)
 {
     uint32_t output_mask = 0;
 
-#if TMS_PIN >= 0
-    output_mask |= (1U << TMS_PIN);
-#endif
-#if TDI_PIN >= 0
-    output_mask |= (1U << TDI_PIN);
-#endif
-#if TCK_PIN >= 0
-    output_mask |= (1U << TCK_PIN);
-#endif
+    if (TMS_PIN >= 0) output_mask |= (1U << TMS_PIN);
+    if (TDI_PIN >= 0) output_mask |= (1U << TDI_PIN);
+    if (TCK_PIN >= 0) output_mask |= (1U << TCK_PIN);
 
     if (output_mask != 0) {
         GPIO.enable_w1ts.val = output_mask;
     }
 
-#if TDO_PIN >= 0
-    gpio_ll_output_disable(&GPIO, TDO_PIN);
-    gpio_ll_input_enable(&GPIO, TDO_PIN);
-#endif
+    if (TDO_PIN >= 0) {
+        gpio_ll_output_disable(&GPIO, TDO_PIN);
+        gpio_ll_input_enable(&GPIO, TDO_PIN);
+    }
 
-#if TMS_PIN >= 0
-    esp_rom_gpio_connect_out_signal(TMS_PIN, SIG_GPIO_OUT_IDX, false, false);
-#endif
-#if TDI_PIN >= 0
-    esp_rom_gpio_connect_out_signal(TDI_PIN, SIG_GPIO_OUT_IDX, false, false);
-#endif
-#if TCK_PIN >= 0
-    esp_rom_gpio_connect_out_signal(TCK_PIN, SIG_GPIO_OUT_IDX, false, false);
-#endif
+    if (TMS_PIN >= 0) esp_rom_gpio_connect_out_signal(TMS_PIN, SIG_GPIO_OUT_IDX, false, false);
+    if (TDI_PIN >= 0) esp_rom_gpio_connect_out_signal(TDI_PIN, SIG_GPIO_OUT_IDX, false, false);
+    if (TCK_PIN >= 0) esp_rom_gpio_connect_out_signal(TCK_PIN, SIG_GPIO_OUT_IDX, false, false);
 }
 
 void __attribute__((always_inline)) platform_swdio_mode_float(void)

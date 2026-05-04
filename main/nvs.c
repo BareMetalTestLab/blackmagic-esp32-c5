@@ -72,3 +72,42 @@ esp_err_t nvs_load_string(const char* key, mstring_t* value) {
 
     return err;
 }
+
+esp_err_t nvs_save_i32(const char* key, int32_t value) {
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    do {
+        err = nvs_open("config", NVS_READWRITE, &nvs_handle);
+        if(err != ESP_OK) break;
+
+        err = nvs_set_i32(nvs_handle, key, value);
+        if(err != ESP_OK) break;
+
+        err = nvs_commit(nvs_handle);
+        if(err != ESP_OK) break;
+
+        nvs_close(nvs_handle);
+        err = ESP_OK;
+    } while(0);
+
+    return err;
+}
+
+esp_err_t nvs_load_i32(const char* key, int32_t* value) {
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    do {
+        err = nvs_open("config", NVS_READONLY, &nvs_handle);
+        if(err != ESP_OK) break;
+
+        err = nvs_get_i32(nvs_handle, key, value);
+        if(err != ESP_OK) break;
+
+        nvs_close(nvs_handle);
+        err = ESP_OK;
+    } while(0);
+
+    return err;
+}

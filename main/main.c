@@ -17,6 +17,7 @@
 #include "gdb_if.h"
 #include "platform.h"
 #include "gdb-glue.h"
+#include "nvs-config.h"
 
 #ifdef ENABLE_RTT
 #include "network-rtt.h"
@@ -62,6 +63,9 @@ void app_main(void)
     gdb_glue_init();
 
     nvs_init();
+
+    // Load pin configuration from NVS and apply to platform
+    nvs_config_get_pins(&g_pin_swdio, &g_pin_swclk, &g_pin_tdi, &g_pin_tdo, &g_pin_trst);
 
     network_init();
     network_gdb_server_init();

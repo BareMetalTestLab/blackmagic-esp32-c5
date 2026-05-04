@@ -135,6 +135,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
     status.className = 'info';
     
     const baseAddr = document.getElementById('baseAddr').value;
+    const iface = document.querySelector('input[name="iface"]:checked').value;
     
     try {
         const paramsResponse = await fetch('/flash-params', {
@@ -142,7 +143,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: 'baseAddr=' + encodeURIComponent(baseAddr)
+            body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
         });
         
         if (!paramsResponse.ok) {

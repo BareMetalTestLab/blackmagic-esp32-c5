@@ -22,11 +22,12 @@
 typedef struct
 {
     uint32_t base_addr;
-    // Add more parameters here in the future
+    bool use_swd; // true = SWD, false = JTAG
 } flash_params_t;
 
 static flash_params_t flash_params = {
     .base_addr = FLASH_BASE_ADDR,
+    .use_swd = true, // Default to SWD
 };
 
 static esp_err_t root_get_handler(httpd_req_t *req)
@@ -56,22 +57,40 @@ static esp_err_t flash_params_post_handler(httpd_req_t *req)
 
     // Parse URL-encoded form data
     char base_addr_str[32] = {0};
+    char iface_str[8] = {0};
+    bool params_ok = false;
+
     if (httpd_query_key_value(content, "baseAddr", base_addr_str, sizeof(base_addr_str)) == ESP_OK)
     {
         uint32_t new_addr = strtoul(base_addr_str, NULL, 0);
         if (new_addr != 0)
         {
             flash_params.base_addr = new_addr;
-            ESP_LOGI(TAG, "Flash parameters updated: base_addr=0x%08lX", flash_params.base_addr);
-
-            httpd_resp_set_type(req, "application/json");
-            char resp[128];
-            snprintf(resp, sizeof(resp),
-                     "{\"success\":true,\"baseAddr\":\"0x%08lX\"}",
-                     flash_params.base_addr);
-            httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
+            params_ok = true;
         }
+    }
+
+    if (httpd_query_key_value(content, "iface", iface_str, sizeof(iface_str)) == ESP_OK)
+    {
+        if (strncmp(iface_str, "swd", 3) == 0)
+            flash_params.use_swd = true;
+        else if (strncmp(iface_str, "jtag", 4) == 0)
+            flash_params.use_swd = false;
+        params_ok = true;
+    }
+
+    if (params_ok)
+    {
+        ESP_LOGI(TAG, "Flash parameters updated: base_addr=0x%08lX, iface=%s",
+                 flash_params.base_addr, flash_params.use_swd ? "SWD" : "JTAG");
+
+        httpd_resp_set_type(req, "application/json");
+        char resp[128];
+        snprintf(resp, sizeof(resp),
+                 "{\"success\":true,\"baseAddr\":\"0x%08lX\",\"iface\":\"%s\"}",
+                 flash_params.base_addr, flash_params.use_swd ? "swd" : "jtag");
+        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
     }
 
     httpd_resp_set_type(req, "application/json");
@@ -191,16 +210,12 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     }
 
     bool target_found = false;
-    if (adiv5_swd_scan())
+    ESP_LOGI(TAG, "Scanning via %s...", flash_params.use_swd ? "SWD" : "JTAG");
+    if (flash_params.use_swd ? adiv5_swd_scan() : jtag_scan())
     {
-        ESP_LOGI(TAG, "Target found via SWD");
+        ESP_LOGI(TAG, "Target found via %s", flash_params.use_swd ? "SWD" : "JTAG");
         target_found = true;
     }
-    // else if (jtag_scan())
-    // {
-    //     ESP_LOGI(TAG, "Target found via JTAG");
-    //     target_found = true;
-    // }
 
     if (!target_found)
     {

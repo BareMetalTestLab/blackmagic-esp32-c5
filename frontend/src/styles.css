@@ -122,6 +122,29 @@ input[type='file'] {
     width: 200px;
 }
 
+.iface-select {
+    margin: 20px 0;
+}
+
+.iface-select > label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+.radio-group {
+    display: flex;
+    gap: 20px;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 15px;
+}
+
 button {
     background-color: #4CAF50;
     color: white;

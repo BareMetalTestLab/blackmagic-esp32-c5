@@ -42,20 +42,22 @@ void led_set_blue(uint8_t value);
 #define SWDIO_PIN (23)
 
 #undef PLATFORM_HAS_TRACESWO
-#define TRACESWO_PIN 18
+#define TRACESWO_PIN 27
 
 /* Keep Black Magic style aliases: SWDIO/TMS and SWCLK/TCK share lines. */
 #define TMS_PORT   SWDIO_PORT
 #define TDI_PORT   SWDIO_PORT
 #define TDO_PORT   SWDIO_PORT
-#define TCK_PORT   SWCLK_PORT
+#define TCK_PORT   SWDIO_PORT
+#define TRST_PORT  SWDIO_PORT
 #define SWDIO_PORT SWCLK_PORT
 
 /* Default 4-wire JTAG mapping, adjust for your board wiring. */
 #define TMS_PIN (SWDIO_PIN)
-#define TDI_PIN (19)
+#define TDI_PIN (28)
 #define TDO_PIN (TRACESWO_PIN)
 #define TCK_PIN (SWCLK_PIN)
+#define TRST_PIN (25)
 
 #if SWDIO_PIN >= 32 || SWCLK_PIN >= 32 || TMS_PIN >= 32 || TDI_PIN >= 32 || TDO_PIN >= 32 || TCK_PIN >= 32
 #error To support pins greater than 31, change the platform_gpio functions

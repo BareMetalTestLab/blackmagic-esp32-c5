@@ -36,6 +36,19 @@
                         <label for='baseAddr'>Flash Base Address (hex):</label>
                         <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
                     </div>
+                    <div class='iface-select'>
+                        <label>Programming Interface:</label>
+                        <div class='radio-group'>
+                            <label class='radio-label'>
+                                <input type='radio' name='iface' id='ifaceSwd' value='swd' checked>
+                                SWD
+                            </label>
+                            <label class='radio-label'>
+                                <input type='radio' name='iface' id='ifaceJtag' value='jtag'>
+                                JTAG
+                            </label>
+                        </div>
+                    </div>
                 </div>
             </details>
             

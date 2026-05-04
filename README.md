@@ -98,10 +98,10 @@ Notes:
 - Update these values in `components/esp32-platform/platform.h` if your board wiring is different.
 
 ![Pin configuration web UI](docs/pin_config.png)
-*Web interface — Pin Configuration: настройка номеров GPIO для SWDIO, SWCLK, TDI, TDO и TRST.*
+*Web interface — Pin Configuration: set GPIO numbers for SWDIO, SWCLK, TDI, TDO and TRST.*
 
 ![Network configuration web UI](docs/network_config.png)
-*Web interface — Network Configuration: настройка Wi-Fi SSID, пароля и hostname устройства.*
+*Web interface — Network Configuration: configure Wi-Fi SSID, password and device hostname.*
 
 ## RTT Support
 To enable RTT support, ensure the following:

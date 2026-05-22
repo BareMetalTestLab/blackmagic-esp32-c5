@@ -16,7 +16,17 @@ void led_set_red(uint8_t value);
 void led_set_green(uint8_t value);
 void led_set_blue(uint8_t value);
 
+#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#define PLATFORM_IDENT "ESP32-C6"
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
 #define PLATFORM_IDENT "ESP32-C5"
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+#define PLATFORM_IDENT "ESP32-C3"
+#elif defined(CONFIG_IDF_TARGET_ESP32C2)
+#define PLATFORM_IDENT "ESP32-C2"
+#else
+#define PLATFORM_IDENT CONFIG_IDF_TARGET
+#endif
 
 #define NO_USB_PLEASE
 

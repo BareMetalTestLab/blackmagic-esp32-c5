@@ -16,6 +16,7 @@ uint32_t swd_delay_cnt = 0;
 uint32_t target_clk_divider = 0;
 
 /* Default pin assignments — can be overridden at runtime via nvs-config */
+/* TODO: ESP32-C6 devkits:GPIO 4–7 are claimed by the built-in USB-JTAG controller — avoid those pins. */
 int32_t g_pin_swdio = 23;
 int32_t g_pin_swclk = 24;
 int32_t g_pin_tdi   = 28;

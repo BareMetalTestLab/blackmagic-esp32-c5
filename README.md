@@ -1,109 +1,102 @@
 # blackmagic-esp32-c5
 
-Black Magic Probe firmware for ESP32-C5 with network GDB server support.
+Black Magic Probe firmware for ESP32-C5 (and other ESP32-Cx chips). Turns the board into a wireless debug adapter: GDB connects over Wi-Fi, no OpenOCD required.
 
-## I seem esp32-c5 is the best choice and I've been waiting for it for a long time.
+| Port | Purpose |
+| --- | --- |
+| `80` | Web UI — OTA flash, Wi-Fi credentials, GPIO pin assignment |
+| `2345` | GDB remote serial protocol |
+| `2346` | Segger RTT console (optional, see [RTT](#rtt)) |
+
+All settings (Wi-Fi credentials, hostname, GPIO pins) are stored in NVS and persist across reboots. They can be changed at runtime through the web UI.
 
 ## Building
 
-The project requires specific ESP-IDF configuration settings:
-
-### Required Configuration
-
-1. **Partition Table**: Must use `SINGLE_APP_LARGE` (3MB)
-   - The firmware with all target support requires more than 1MB
-   - Configured in `sdkconfig.defaults`
-   - Path in menuconfig: `Partition Table → Single factory app (large), no OTA`
-
-2. **Component Linking**: `WHOLE_ARCHIVE` flag enabled
-   - Required to properly link strong symbol definitions from target probe files
-   - Without this flag, weak symbol stubs from `target_probe.c` are used instead of actual target implementations
-   - Configured in `components/esp32-platform/CMakeLists.txt`
-
-3. **Watchdog Timers**: Disabled (`CONFIG_ESP_INT_WDT=n`, `CONFIG_ESP_TASK_WDT_EN=n`)
-   - Black Magic Probe has long-running functions (flash operations, target probing) that exceed default watchdog timeout
-   - Disabling prevents spurious watchdog resets during legitimate operations
-   - Configured in `sdkconfig.defaults`
-
-These settings are automatically applied from `sdkconfig.defaults` on first build after cloning.
-
-### Build Commands
-
 ```bash
-# Build ESP32 firmware (frontend dependencies and build happen automatically)
 idf.py build
 idf.py flash monitor
 ```
 
-The frontend dependencies (`npm install`) and build are automatically handled during the ESP-IDF build process via a CMake custom command.
+All configuration in `sdkconfig.defaults` is applied automatically on first build. The frontend (`npm install` + build) is also handled automatically by CMake — no manual steps needed.
 
-## Frontend Development
-
-The web interface for firmware flashing is located in the `frontend/` directory:
+### Building for a different chip
 
 ```bash
-cd frontend
-npm run build     # Build and generate C header file (optional - done automatically during idf.py build)
+idf.py set-target esp32c6   # regenerates sdkconfig
+idf.py build
 ```
 
-**Features:**
-- 📁 Drag & drop firmware files (.bin, .elf)
-- 🖱️ Click to browse alternative
-- ✅ Automatic file validation
-- 📊 Real-time upload progress
+### Why these sdkconfig.defaults settings
 
-The build process:
-1. Inlines CSS and JavaScript into HTML
-2. Minifies the resulting HTML
-3. Generates `frontend/dist/network-http-page.h` with the page as a C string
+| Setting | Reason |
+| --- | --- |
+| `PARTITION_TABLE_SINGLE_APP_LARGE` (3 MB) | Firmware with all BMP targets exceeds 1 MB |
+| `WHOLE_ARCHIVE` on esp32-platform component | Forces strong symbols from target probe files to win over weak stubs in `target_probe.c` |
+| `CONFIG_ESP_INT_WDT=n`, `CONFIG_ESP_TASK_WDT_EN=n` | Flash and target probe operations exceed the default watchdog timeout |
 
-**Note**: When you run `idf.py build`, the build system automatically:
-- Installs npm dependencies if needed
-- Rebuilds the frontend if any source files (`src/index.html`, `src/styles.css`, `src/app.js`) have changed
+## Wi-Fi
 
-Manual build is only needed for testing frontend changes independently.
+On boot the device connects to the configured network (STA mode). If the connection fails within 5 seconds it falls back to a soft-AP:
 
-### Frontend Testing
+| SSID | Password |
+| --- | --- |
+| `blackmagic` | `blackmagic` |
 
-To test the web interface during development:
-
-```bash
-cd frontend
-npm run dev
-```
-
-This starts a local server and opens the interface in your browser. To test actual uploads, you'll need to connect to the ESP32 device on your network.
-
-See [frontend/README.md](frontend/README.md) for more options.
+In STA mode the device is reachable as `blackmagic.local` via mDNS / NetBIOS.
 
 ## Usage
 
-`$ target extended-remote <ip_esp32>:2345`
-`$ monitor swdp_scan`
-`$ attach 1`
+### GDB
 
-## ESP32-C5 Debug Pin Mapping
+```bash
+$ arm-none-eabi-gdb firmware.elf
+(gdb) target extended-remote blackmagic.local:2345
+(gdb) monitor swdp_scan
+(gdb) attach 1
+```
 
-Default debug pin mapping used by the ESP32 platform port (`components/esp32-platform/platform.h`):
+### RTT
+
+RTT support is compiled in by default (`-DENABLE_RTT=1` in `CMakeLists.txt`). Enable it from the GDB session while the target is attached, then connect in a separate terminal:
+
+```bash
+(gdb) monitor rtt enable
+(gdb) monitor rtt status   # confirm control block found
+```
+
+```bash
+$ telnet blackmagic.local 2346
+```
+
+## Default GPIO Pin Mapping
+
+All pins are overridable at runtime through the web UI (stored in NVS).
 
 | Signal | GPIO |
 | --- | --- |
 | SWDIO / TMS | 23 |
 | SWCLK / TCK | 24 |
-| TDI | 19 |
-| TDO / TRACESWO | 18 |
+| TDI | 28 |
+| TDO / TRACESWO | 27 |
+| TRST | 25 |
 
-Notes:
-- SWD and JTAG share the SWDIO/TMS and SWCLK/TCK lines, following common Black Magic platform style.
-- Update these values in `components/esp32-platform/platform.h` if your board wiring is different.
+SWD and JTAG share SWDIO/TMS and SWCLK/TCK lines (standard Black Magic Probe convention).
+
+## Web UI
 
 ![Pin configuration web UI](docs/pin_config.png)
-*Web interface — Pin Configuration: set GPIO numbers for SWDIO, SWCLK, TDI, TDO and TRST.*
+*Pin Configuration — set GPIO numbers for SWDIO, SWCLK, TDI, TDO and TRST.*
 
 ![Network configuration web UI](docs/network_config.png)
-*Web interface — Network Configuration: configure Wi-Fi SSID, password and device hostname.*
+*Network Configuration — Wi-Fi SSID, password and device hostname.*
 
-## RTT Support
-To enable RTT support, ensure the following:
-1. In `CMakeLists.txt`, add the definition `-DENABLE_RTT=1`.
-2. Use telnet to connect to the RTT server on port 2346. `$ telnet <ip_esp32> 2346`
+### Frontend development
+
+```bash
+cd frontend
+npm run dev    # local dev server with live reload
+npm run build  # manual build (also runs automatically via idf.py build)
+```
+
+See [frontend/README.md](frontend/README.md) for details.
+

@@ -28,8 +28,6 @@ idf.py build
 
 ### Why these sdkconfig.defaults settings
 
-| Setting | Reason |
-| --- | --- |
 | `PARTITION_TABLE_SINGLE_APP_LARGE` (3 MB) | Firmware with all BMP targets exceeds 1 MB |
 | `WHOLE_ARCHIVE` on esp32-platform component | Forces strong symbols from target probe files to win over weak stubs in `target_probe.c` |
 | `CONFIG_ESP_INT_WDT=n`, `CONFIG_ESP_TASK_WDT_EN=n` | Flash and target probe operations exceed the default watchdog timeout |
@@ -92,11 +90,8 @@ SWD and JTAG share SWDIO/TMS and SWCLK/TCK lines (standard Black Magic Probe con
 
 ### Frontend development
 
-```bash
-cd frontend
-npm run dev    # local dev server with live reload
-npm run build  # manual build (also runs automatically via idf.py build)
-```
-
 See [frontend/README.md](frontend/README.md) for details.
 
+## Run VS Code debugger with Black Magic Probe
+
+[bm-vscode-configs](https://github.com/BareMetalTestLab/bm-vscode-configs) — ready-to-use VS Code project template for debugging with Black Magic Probe (with support RTT). Includes pre-configured `launch.json` for the [Cortex-Debug](https://marketplace.visualstudio.com/items?itemName=marus25.cortex-debug) extension. All project-specific paths and settings are centralized in `.vscode/settings.json`.

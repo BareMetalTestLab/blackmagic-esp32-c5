@@ -131,7 +131,7 @@ static bool wifi_sta_try(const char *ssid, const char *pass)
         WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
         pdTRUE,
         pdFALSE,
-        pdMS_TO_TICKS(10000));
+        pdMS_TO_TICKS(2000));
 
     if (bits & WIFI_CONNECTED_BIT)
     {
@@ -201,7 +201,21 @@ void network_init(void)
     int32_t net_count = 0;
     nvs_config_get_networks_count(&net_count);
 
-    ESP_LOGI(TAG, "Trying %ld known network(s)...", (long)net_count);
+    esp_wifi_scan_start(NULL, true);
+
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+
+    wifi_ap_record_t *ap_list = NULL;
+    if (ap_count > 0)
+    {
+        ap_list = malloc(ap_count * sizeof(wifi_ap_record_t));
+        if (ap_list)
+            esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+    }
+
+    ESP_LOGI(TAG, "Scan found %u AP(s), trying %ld known network(s)...", ap_count, (long)net_count);
+
     for (int32_t i = 0; i < net_count && !connected; i++)
     {
         wifi_network_t net;
@@ -209,13 +223,26 @@ void network_init(void)
 
         if (!net.auto_connect || net.ssid[0] == '\0') continue;
 
+        bool visible = (ap_list == NULL); // if malloc failed — try anyway
+        for (uint16_t j = 0; j < ap_count && !visible; j++)
+        {
+            if (strcmp((char *)ap_list[j].ssid, net.ssid) == 0)
+                visible = true;
+        }
+
+        if (!visible)
+        {
+            ESP_LOGI(TAG, "Network [%ld] '%s' not in scan results, skipping", (long)i, net.ssid);
+            continue;
+        }
+
         ESP_LOGI(TAG, "Trying network [%ld]: %s", (long)i, net.ssid);
         connected = wifi_sta_try(net.ssid, net.pass);
         if (!connected)
-        {
             ESP_LOGW(TAG, "Failed to connect to %s", net.ssid);
-        }
     }
+
+    free(ap_list);
 
     s_wifi_scanning = false;
 

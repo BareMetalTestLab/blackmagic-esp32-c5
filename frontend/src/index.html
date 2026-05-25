@@ -15,6 +15,7 @@
     <!-- Tabs -->
     <div class="tabs">
         <button class="tab-button active" data-tab="flash">📥 Flash Firmware</button>
+        <button class="tab-button" data-tab="networks">📶 Networks</button>
         <button class="tab-button" data-tab="settings">⚙️ Settings</button>
     </div>
     
@@ -62,21 +63,44 @@
         </div>
     </div>
     
+    <!-- Networks Tab Content -->
+    <div class="tab-content" id="networks-tab">
+        <div class='settings-form'>
+            <h2>Known Networks</h2>
+            <div id='networksList'></div>
+            <div id='addNetworkForm' style='display:none; margin-top:16px; padding-top:16px; border-top:1px solid #ddd;'>
+                <h3 style='margin-top:0;'>Add New Network</h3>
+                <form id='addNetFormEl'>
+                    <div class='form-group'>
+                        <label for='newSsid'>SSID:</label>
+                        <input type='text' id='newSsid' maxlength='32' required placeholder='Network name'>
+                    </div>
+                    <div class='form-group'>
+                        <label for='newPass'>Password:</label>
+                        <input type='password' id='newPass' maxlength='64' placeholder='Leave empty for open network'>
+                    </div>
+                    <div class='form-group checkbox-group'>
+                        <label>
+                            <input type='checkbox' id='newAutoConnect' checked>
+                            Auto-connect on boot
+                        </label>
+                    </div>
+                    <div class='btn-row'>
+                        <button type='submit'>Save Network</button>
+                        <button type='button' class='btn-secondary' id='cancelAddBtn'>Cancel</button>
+                    </div>
+                </form>
+            </div>
+            <button type='button' id='addNetworkBtn' style='margin-top:16px;'>+ Add Network</button>
+            <div id='networksStatus' style='margin-top:12px;'></div>
+        </div>
+    </div>
+
     <!-- Settings Tab Content -->
     <div class="tab-content" id="settings-tab">
         <div class='settings-form'>
             <h2>NVS Configuration</h2>
             <form id='settingsForm'>
-                <div class='form-group'>
-                    <label for='ssid'>Wi-Fi SSID:</label>
-                    <input type='text' id='ssid' name='ssid' placeholder='Enter Wi-Fi SSID'>
-                </div>
-                
-                <div class='form-group'>
-                    <label for='pass'>Wi-Fi Password:</label>
-                    <input type='password' id='pass' name='pass' placeholder='Enter Wi-Fi Password'>
-                </div>
-                
                 <div class='form-group'>
                     <label for='hostname'>Hostname:</label>
                     <input type='text' id='hostname' name='hostname' placeholder='Enter hostname'>

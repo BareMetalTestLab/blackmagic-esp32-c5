@@ -253,9 +253,7 @@ async function loadSettings() {
         
         const data = await response.json();
         
-        document.getElementById('ssid').value = data.ssid || '';
-        document.getElementById('pass').value = data.pass || '';
-        document.getElementById('hostname').value = data.hostname || '';
+        document.getElementById('hostname').value = data.hostname || ''
         
         settingsStatus.textContent = '';
         settingsStatus.className = '';
@@ -270,8 +268,6 @@ async function loadSettings() {
 settingsForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     
-    const ssid = document.getElementById('ssid').value;
-    const pass = document.getElementById('pass').value;
     const hostname = document.getElementById('hostname').value;
     
     settingsStatus.textContent = 'Saving settings...';
@@ -280,8 +276,6 @@ settingsForm.addEventListener('submit', async (e) => {
     
     try {
         const params = new URLSearchParams();
-        if (ssid) params.append('ssid', ssid);
-        if (pass) params.append('pass', pass);
         if (hostname) params.append('hostname', hostname);
         
         const response = await fetch('/nvs-settings', {
@@ -325,6 +319,9 @@ tabButtons.forEach(button => {
         if (button.getAttribute('data-tab') === 'settings') {
             loadSettings();
             loadPins();
+        }
+        if (button.getAttribute('data-tab') === 'networks') {
+            loadNetworks();
         }
     });
 });
@@ -390,3 +387,178 @@ pinsForm.addEventListener('submit', async (e) => {
         setTimeout(() => { pinsStatus.textContent = ''; pinsStatus.className = ''; }, 4000);
     }
 });
+
+/* ── Networks ── */
+
+function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escapeAttr(str) {
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function loadNetworks() {
+    try {
+        const resp = await fetch('/networks');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const networks = await resp.json();
+        renderNetworks(networks);
+    } catch (e) {
+        showNetworksStatus('✗ Error loading networks: ' + e.message, 'error');
+    }
+}
+
+function renderNetworks(networks) {
+    const list = document.getElementById('networksList');
+    if (networks.length === 0) {
+        list.innerHTML = '<p style="color:#888;">No networks configured yet.</p>';
+        return;
+    }
+    list.innerHTML = networks.map(n => `
+        <div class="network-card" id="net-${n.idx}">
+            <div class="network-info">
+                <span class="network-ssid">${escapeHtml(n.ssid)}</span>
+                <span class="badge ${n.auto_connect ? 'badge-auto' : 'badge-manual'}">${n.auto_connect ? 'Auto' : 'Manual'}</span>
+            </div>
+            <div class="network-actions">
+                <button class="btn-small btn-edit" onclick="showEditForm(${n.idx})">Edit</button>
+                <button class="btn-small btn-delete" onclick="deleteNetwork(${n.idx})">Delete</button>
+            </div>
+            <div class="network-edit-form" id="edit-form-${n.idx}" style="display:none;">
+                <form onsubmit="updateNetwork(event, ${n.idx})">
+                    <div class="form-group">
+                        <label>SSID:</label>
+                        <input type="text" id="edit-ssid-${n.idx}" value="${escapeAttr(n.ssid)}" maxlength="32" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password (leave empty to keep existing):</label>
+                        <input type="password" id="edit-pass-${n.idx}" placeholder="••••••••" maxlength="64">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="edit-auto-${n.idx}" ${n.auto_connect ? 'checked' : ''}>
+                            Auto-connect on boot
+                        </label>
+                    </div>
+                    <div class="btn-row">
+                        <button type="submit">Save</button>
+                        <button type="button" class="btn-secondary" onclick="hideEditForm(${n.idx})">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `).join('');
+}
+
+function showEditForm(idx) {
+    document.querySelectorAll('.network-edit-form').forEach(f => f.style.display = 'none');
+    document.getElementById('edit-form-' + idx).style.display = 'block';
+}
+
+function hideEditForm(idx) {
+    document.getElementById('edit-form-' + idx).style.display = 'none';
+}
+
+async function updateNetwork(event, idx) {
+    event.preventDefault();
+    const ssid = document.getElementById('edit-ssid-' + idx).value;
+    const pass = document.getElementById('edit-pass-' + idx).value;
+    const auto = document.getElementById('edit-auto-' + idx).checked;
+
+    const params = new URLSearchParams({ idx: idx, ssid: ssid, auto_connect: auto ? '1' : '0' });
+    if (pass) params.append('pass', pass);
+
+    try {
+        const resp = await fetch('/networks/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString()
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showNetworksStatus('✓ Network updated', 'success');
+            loadNetworks();
+        } else {
+            showNetworksStatus('✗ ' + (result.error || 'Failed to update'), 'error');
+        }
+    } catch (e) {
+        showNetworksStatus('✗ Error: ' + e.message, 'error');
+    }
+}
+
+async function deleteNetwork(idx) {
+    if (!confirm('Delete this network?')) return;
+    try {
+        const resp = await fetch('/networks/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'idx=' + idx
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showNetworksStatus('✓ Network deleted', 'success');
+            loadNetworks();
+        } else {
+            showNetworksStatus('✗ ' + (result.error || 'Failed to delete'), 'error');
+        }
+    } catch (e) {
+        showNetworksStatus('✗ Error: ' + e.message, 'error');
+    }
+}
+
+document.getElementById('addNetworkBtn').addEventListener('click', () => {
+    document.getElementById('addNetworkForm').style.display = 'block';
+    document.getElementById('addNetworkBtn').style.display = 'none';
+});
+
+document.getElementById('cancelAddBtn').addEventListener('click', () => {
+    document.getElementById('addNetworkForm').style.display = 'none';
+    document.getElementById('addNetworkBtn').style.display = 'inline-block';
+    document.getElementById('addNetFormEl').reset();
+});
+
+document.getElementById('addNetFormEl').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ssid = document.getElementById('newSsid').value.trim();
+    const pass = document.getElementById('newPass').value;
+    const auto = document.getElementById('newAutoConnect').checked;
+
+    if (!ssid) {
+        showNetworksStatus('✗ SSID cannot be empty', 'error');
+        return;
+    }
+
+    const params = new URLSearchParams({
+        ssid: ssid,
+        pass: pass,
+        auto_connect: auto ? '1' : '0'
+    });
+
+    try {
+        const resp = await fetch('/networks/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString()
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showNetworksStatus('✓ Network added', 'success');
+            document.getElementById('addNetworkForm').style.display = 'none';
+            document.getElementById('addNetworkBtn').style.display = 'inline-block';
+            document.getElementById('addNetFormEl').reset();
+            loadNetworks();
+        } else {
+            showNetworksStatus('✗ ' + (result.error || 'Failed to add'), 'error');
+        }
+    } catch (e) {
+        showNetworksStatus('✗ Error: ' + e.message, 'error');
+    }
+});
+
+function showNetworksStatus(msg, cls) {
+    const el = document.getElementById('networksStatus');
+    el.textContent = msg;
+    el.className = cls;
+    setTimeout(() => { el.textContent = ''; el.className = ''; }, 4000);
+}

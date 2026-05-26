@@ -15,8 +15,8 @@
     <!-- Tabs -->
     <div class="tabs">
         <button class="tab-button active" data-tab="flash">📥 Flash Firmware</button>
-        <button class="tab-button" data-tab="networks">📶 Networks</button>
-        <button class="tab-button" data-tab="settings">⚙️ Settings</button>
+        <button class="tab-button" data-tab="networks">📶 Network Settings</button>
+        <button class="tab-button" data-tab="settings">⚙️ Hardware Settings</button>
     </div>
     
     <!-- Flash Tab Content -->
@@ -66,6 +66,18 @@
     <!-- Networks Tab Content -->
     <div class="tab-content" id="networks-tab">
         <div class='settings-form'>
+            <h2>Server Configuration</h2>
+            <form id='settingsForm'>
+                <div class='form-group'>
+                    <label for='hostname'>Hostname:</label>
+                    <input type='text' id='hostname' name='hostname' placeholder='Enter hostname'>
+                </div>
+                
+                <button type='submit' id='saveSettingsBtn'>Save Hostname</button>
+            </form>
+            <div id='settingsStatus'></div>
+        </div>
+        <div class='settings-form'>
             <h2>Known Networks</h2>
             <div id='networksList'></div>
             <div id='addNetworkForm' style='display:none; margin-top:16px; padding-top:16px; border-top:1px solid #ddd;'>
@@ -98,18 +110,6 @@
 
     <!-- Settings Tab Content -->
     <div class="tab-content" id="settings-tab">
-        <div class='settings-form'>
-            <h2>NVS Configuration</h2>
-            <form id='settingsForm'>
-                <div class='form-group'>
-                    <label for='hostname'>Hostname:</label>
-                    <input type='text' id='hostname' name='hostname' placeholder='Enter hostname'>
-                </div>
-                
-                <button type='submit' id='saveSettingsBtn'>Save Settings</button>
-            </form>
-            <div id='settingsStatus'></div>
-        </div>
 
         <div class='settings-form' style='margin-top:24px;'>
             <h2>Pin Configuration</h2>

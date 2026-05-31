@@ -2,13 +2,24 @@
 set(FRONTEND_DIR "${CMAKE_SOURCE_DIR}/frontend")
 file(MAKE_DIRECTORY "${FRONTEND_DIR}/dist")
 
-idf_component_register(SRCS "nvs-config.c" "network.c" "main.c" "network-gdb.c" "network-http.c" "network-rtt.c" "nvs.c" "nvs-config.c"
-                    PRIV_REQUIRES esp_wifi esp_https_server nvs_flash
-                    INCLUDE_DIRS "." "${CMAKE_SOURCE_DIR}/frontend/dist")
+idf_component_register(SRCS
+    "network-http-system.c"
+    "network-http-settings.c"
+    "network-http-target.c"
+    "nvs-config.c"
+    "network.c"
+    "main.c"
+    "network-gdb.c"
+    "network-http.c"
+    "network-rtt.c"
+    "nvs.c"
+    "nvs-config.c"
+    PRIV_REQUIRES esp_wifi esp_https_server nvs_flash
+    INCLUDE_DIRS "." "${CMAKE_SOURCE_DIR}/frontend/dist")
 
 # Generate frontend header file
 set(GENERATED_HEADER "${FRONTEND_DIR}/dist/network-http-page.h")
-set(FRONTEND_SOURCES 
+set(FRONTEND_SOURCES
     "${FRONTEND_DIR}/src/index.html"
     "${FRONTEND_DIR}/src/styles.css"
     "${FRONTEND_DIR}/src/app.js"

@@ -27,7 +27,9 @@
 #define MDNS_INSTANCE "blackmagic web server"
 
 #define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
 static EventGroupHandle_t s_wifi_event_group;
+static volatile bool s_wifi_scanning = true;
 
 void network_hostnames_init(void)
 {
@@ -81,11 +83,7 @@ static void wifi_ap_event_handler(void *arg, esp_event_base_t event_base,
 static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
-    {
-        esp_wifi_connect();
-    }
-    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
@@ -93,50 +91,70 @@ static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
-        ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
-        esp_wifi_connect();
+        if (s_wifi_scanning)
+        {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
+            esp_wifi_connect();
+        }
     }
 }
 
-static void wifi_init_sta(mstring_t *ssid, mstring_t *pass)
+static void wifi_sta_begin(void)
 {
     esp_netif_create_default_wifi_sta();
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_sta_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL));
-
-    wifi_config_t wifi_config;
-    memset(&wifi_config, 0, sizeof(wifi_config_t));
-
-    memcpy(wifi_config.sta.ssid, mstring_get_cstr(ssid), sizeof(wifi_config.sta.ssid));
-    memcpy(wifi_config.sta.password, mstring_get_cstr(pass), sizeof(wifi_config.sta.password));
-
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "wifi_init_sta finished. SSID:%s password:%s", mstring_get_cstr(ssid), mstring_get_cstr(pass));
 }
 
-static void wifi_init_softap(mstring_t *ssid, mstring_t *pass)
+static bool wifi_sta_try(const char *ssid, const char *pass)
 {
-    esp_netif_create_default_wifi_ap();
+    wifi_config_t wifi_config;
+    memset(&wifi_config, 0, sizeof(wifi_config_t));
+    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    esp_wifi_connect();
+
+    ESP_LOGI(TAG, "Waiting for connection to '%s'...", ssid);
+    EventBits_t bits = xEventGroupWaitBits(
+        s_wifi_event_group,
+        WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+        pdTRUE,
+        pdFALSE,
+        pdMS_TO_TICKS(2000));
+
+    if (bits & WIFI_CONNECTED_BIT)
+    {
+        return true;
+    }
+    esp_wifi_disconnect();
+    return false;
+}
+
+static void wifi_switch_to_ap(const char *ssid, const char *pass)
+{
+    esp_wifi_stop();
+    esp_netif_create_default_wifi_ap();
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_ap_event_handler, NULL));
 
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid_len = strlen(mstring_get_cstr(ssid)),
             .channel = DEFAULT_WIFI_CHANNEL,
             .max_connection = DEFAULT_MAX_STA_CONN,
 #ifdef CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT
             .authmode = WIFI_AUTH_WPA3_PSK,
             .sae_pwe_h2e = WPA3_SAE_PWE_BOTH,
-#else /* CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT */
+#else
             .authmode = WIFI_AUTH_WPA2_PSK,
 #endif
             .pmf_cfg = {
@@ -152,19 +170,11 @@ static void wifi_init_softap(mstring_t *ssid, mstring_t *pass)
         },
     };
 
-    memcpy(
-        &wifi_config.ap.ssid,
-        mstring_get_cstr(ssid),
-        MIN(sizeof(wifi_config.ap.ssid), mstring_size(ssid)));
+    strncpy((char *)wifi_config.ap.ssid, ssid, sizeof(wifi_config.ap.ssid) - 1);
+    strncpy((char *)wifi_config.ap.password, pass, sizeof(wifi_config.ap.password) - 1);
+    wifi_config.ap.ssid_len = strlen(ssid);
 
-    memcpy(
-        &wifi_config.ap.password,
-        mstring_get_cstr(pass),
-        MIN(sizeof(wifi_config.ap.password), mstring_size(pass)));
-
-    wifi_config.ap.ssid_len = mstring_size(ssid);
-
-    if (mstring_size(pass) == 0)
+    if (strlen(pass) == 0)
     {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
@@ -172,51 +182,77 @@ static void wifi_init_softap(mstring_t *ssid, mstring_t *pass)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             mstring_get_cstr(ssid), mstring_get_cstr(pass), DEFAULT_WIFI_CHANNEL);
+    ESP_LOGI(TAG, "AP mode started: SSID=%s", ssid);
 }
 
 void network_init(void)
 {
-    mstring_t *ssid = mstring_alloc();
-    mstring_t *pass = mstring_alloc();
-
-    nvs_config_get_ssid(ssid);
-    nvs_config_get_pass(pass);
-
     s_wifi_event_group = xEventGroupCreate();
+    s_wifi_scanning = true;
 
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-
+    ESP_LOGI(TAG, "Initializing network");
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     network_hostnames_init();
-    wifi_init_sta(ssid, pass);
+    wifi_sta_begin();
 
-    ESP_LOGI(TAG, "Connecting to WiFi as STA...");
+    bool connected = false;
+    int32_t net_count = 0;
+    nvs_config_get_networks_count(&net_count);
 
-    EventBits_t bits = xEventGroupWaitBits(
-        s_wifi_event_group,
-        WIFI_CONNECTED_BIT,
-        pdFALSE,
-        pdFALSE,
-        pdMS_TO_TICKS(5000));
+    esp_wifi_scan_start(NULL, true);
 
-    if ((bits & WIFI_CONNECTED_BIT) == 0)
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+
+    wifi_ap_record_t *ap_list = NULL;
+    if (ap_count > 0)
     {
-        esp_wifi_stop();
-        ESP_LOGW(TAG, "STA connect failed, switching to AP mode");
-        mstring_set(ssid, "blackmagic");
-        mstring_set(pass, "blackmagic");
-        wifi_init_softap(ssid, pass);
+        ap_list = malloc(ap_count * sizeof(wifi_ap_record_t));
+        if (ap_list)
+            esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+    }
+
+    ESP_LOGI(TAG, "Scan found %u AP(s), trying %ld known network(s)...", ap_count, (long)net_count);
+
+    for (int32_t i = 0; i < net_count && !connected; i++)
+    {
+        wifi_network_t net;
+        nvs_config_get_network(i, &net);
+
+        if (!net.auto_connect || net.ssid[0] == '\0') continue;
+
+        bool visible = (ap_list == NULL); // if malloc failed — try anyway
+        for (uint16_t j = 0; j < ap_count && !visible; j++)
+        {
+            if (strcmp((char *)ap_list[j].ssid, net.ssid) == 0)
+                visible = true;
+        }
+
+        if (!visible)
+        {
+            ESP_LOGI(TAG, "Network [%ld] '%s' not in scan results, skipping", (long)i, net.ssid);
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Trying network [%ld]: %s", (long)i, net.ssid);
+        connected = wifi_sta_try(net.ssid, net.pass);
+        if (!connected)
+            ESP_LOGW(TAG, "Failed to connect to %s", net.ssid);
+    }
+
+    free(ap_list);
+
+    s_wifi_scanning = false;
+
+    if (!connected)
+    {
+        ESP_LOGW(TAG, "All STA connections failed, switching to AP mode");
+        wifi_switch_to_ap("blackmagic", "blackmagic");
     }
     else
     {
-        ESP_LOGI(TAG, "Connected to AP as STA");
+        ESP_LOGI(TAG, "Connected to WiFi as STA");
     }
-
-    mstring_free(ssid);
-    mstring_free(pass);
 }

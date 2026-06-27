@@ -76,8 +76,8 @@ esp_err_t pins_get_handler(httpd_req_t *req)
     char resp[256];
     snprintf(resp, sizeof(resp),
              "{\"swdio\":%ld,\"swclk\":%ld,\"tdi\":%ld,\"tdo\":%ld,\"trst\":%ld}",
-             (long)g_pin_swdio, (long)g_pin_swclk,
-             (long)g_pin_tdi, (long)g_pin_tdo, (long)g_pin_trst);
+             (long)g_pin_tms_swdio, (long)g_pin_tck_swclk,
+             (long)g_pin_tdi, (long)g_pin_tdo_swo, (long)g_pin_trst);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -99,8 +99,8 @@ esp_err_t pins_post_handler(httpd_req_t *req)
     content[ret] = '\0';
 
     char val[8];
-    int32_t swdio = g_pin_swdio, swclk = g_pin_swclk;
-    int32_t tdi = g_pin_tdi, tdo = g_pin_tdo, trst = g_pin_trst;
+    int32_t swdio = g_pin_tms_swdio, swclk = g_pin_tck_swclk;
+    int32_t tdi = g_pin_tdi, tdo = g_pin_tdo_swo, trst = g_pin_trst;
 
     if (httpd_query_key_value(content, "swdio", val, sizeof(val)) == ESP_OK)
         swdio = (int32_t)atoi(val);
@@ -116,10 +116,10 @@ esp_err_t pins_post_handler(httpd_req_t *req)
     nvs_config_set_pins(swdio, swclk, tdi, tdo, trst);
 
     // Apply immediately
-    g_pin_swdio = swdio;
-    g_pin_swclk = swclk;
+    g_pin_tms_swdio = swdio;
+    g_pin_tck_swclk = swclk;
     g_pin_tdi = tdi;
-    g_pin_tdo = tdo;
+    g_pin_tdo_swo = tdo;
     g_pin_trst = trst;
 
     ESP_LOGI(TAG, "Pins updated: SWDIO=%ld SWCLK=%ld TDI=%ld TDO=%ld TRST=%ld",

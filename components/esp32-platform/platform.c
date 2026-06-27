@@ -4,6 +4,7 @@
 #include "general.h"
 #include <esp_log.h>
 #include <driver/gpio.h>
+#include <driver/uart.h>
 #include <rom/ets_sys.h>
 #include "esp_timer.h"
 
@@ -11,17 +12,16 @@
 #include <esp_rom_gpio.h>
 #include <led_strip.h>
 
-
 uint32_t swd_delay_cnt = 0;
 uint32_t target_clk_divider = 0;
 
 /* Default pin assignments — can be overridden at runtime via nvs-config */
 /* TODO: ESP32-C6 devkits:GPIO 4–7 are claimed by the built-in USB-JTAG controller — avoid those pins. */
-int32_t g_pin_swdio = 23;
-int32_t g_pin_swclk = 24;
-int32_t g_pin_tdi   = 28;
-int32_t g_pin_tdo   = 27;
-int32_t g_pin_trst  = 25;
+int32_t g_pin_tms_swdio = 26;
+int32_t g_pin_tck_swclk = 25;
+int32_t g_pin_tdi = 23;
+int32_t g_pin_tdo_swo = 24;
+int32_t g_pin_trst = 27;
 
 // static const char* TAG = "gdb-platform";
 
@@ -29,22 +29,30 @@ void platform_jtag_pins_init(void)
 {
     uint32_t output_mask = 0;
 
-    if (TMS_PIN >= 0) output_mask |= (1U << TMS_PIN);
-    if (TDI_PIN >= 0) output_mask |= (1U << TDI_PIN);
-    if (TCK_PIN >= 0) output_mask |= (1U << TCK_PIN);
+    if (TMS_PIN >= 0)
+        output_mask |= (1U << TMS_PIN);
+    if (TDI_PIN >= 0)
+        output_mask |= (1U << TDI_PIN);
+    if (TCK_PIN >= 0)
+        output_mask |= (1U << TCK_PIN);
 
-    if (output_mask != 0) {
+    if (output_mask != 0)
+    {
         GPIO.enable_w1ts.val = output_mask;
     }
 
-    if (TDO_PIN >= 0) {
+    if (TDO_PIN >= 0)
+    {
         gpio_ll_output_disable(&GPIO, TDO_PIN);
         gpio_ll_input_enable(&GPIO, TDO_PIN);
     }
 
-    if (TMS_PIN >= 0) esp_rom_gpio_connect_out_signal(TMS_PIN, SIG_GPIO_OUT_IDX, false, false);
-    if (TDI_PIN >= 0) esp_rom_gpio_connect_out_signal(TDI_PIN, SIG_GPIO_OUT_IDX, false, false);
-    if (TCK_PIN >= 0) esp_rom_gpio_connect_out_signal(TCK_PIN, SIG_GPIO_OUT_IDX, false, false);
+    if (TMS_PIN >= 0)
+        esp_rom_gpio_connect_out_signal(TMS_PIN, SIG_GPIO_OUT_IDX, false, false);
+    if (TDI_PIN >= 0)
+        esp_rom_gpio_connect_out_signal(TDI_PIN, SIG_GPIO_OUT_IDX, false, false);
+    if (TCK_PIN >= 0)
+        esp_rom_gpio_connect_out_signal(TCK_PIN, SIG_GPIO_OUT_IDX, false, false);
 }
 
 void __attribute__((always_inline)) platform_swdio_mode_float(void)

@@ -65,7 +65,20 @@ void app_main(void)
     nvs_init();
 
     // Load pin configuration from NVS and apply to platform
-    nvs_config_get_pins(&g_pin_swdio, &g_pin_swclk, &g_pin_tdi, &g_pin_tdo, &g_pin_trst);
+    nvs_config_get_pins(&g_pin_tms_swdio, &g_pin_tck_swclk, &g_pin_tdi, &g_pin_tdo_swo, &g_pin_trst);
+
+    // TODO: Add target serial (LP UART) TCP port 2347
+
+    // TODO: Add 3 UARTs for gdb, rtt, serial
+    // 1. (UART0) uart to usb: for gdb
+    // 2. (UART1) uart to usb: for rtt
+    // 3. (LP UART) uart to serial: for target serial output (optional)
+
+    //        ----- <- (USB2TTL) - UART0 ->       gdb       <- TCP port 2345
+    // USB - | HUB |<- (USB2TTL) - UART1 ->       rtt       <- TCP port 2346
+    //        ----- <-    jtag/cdc       -> serial(LP UART) <- TCP port 2347
+
+    // In release build jtag/cdc is not needed, so we can use cdc for serial output, because there are not enough uarts
 
     network_init();
     network_gdb_server_init();

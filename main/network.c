@@ -27,7 +27,7 @@
 #define MDNS_INSTANCE "blackmagic web server"
 
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
+#define WIFI_FAIL_BIT BIT1
 static EventGroupHandle_t s_wifi_event_group;
 static volatile bool s_wifi_scanning = true;
 
@@ -120,10 +120,9 @@ static bool wifi_sta_try(const char *ssid, const char *pass)
     memset(&wifi_config, 0, sizeof(wifi_config_t));
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
     strncpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
-
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    esp_wifi_connect();
+    ESP_ERROR_CHECK(esp_wifi_connect());
 
     ESP_LOGI(TAG, "Waiting for connection to '%s'...", ssid);
     EventBits_t bits = xEventGroupWaitBits(
@@ -131,13 +130,13 @@ static bool wifi_sta_try(const char *ssid, const char *pass)
         WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
         pdTRUE,
         pdFALSE,
-        pdMS_TO_TICKS(2000));
+        pdMS_TO_TICKS(10000));
 
     if (bits & WIFI_CONNECTED_BIT)
     {
         return true;
     }
-    esp_wifi_disconnect();
+    ESP_ERROR_CHECK(esp_wifi_disconnect());
     return false;
 }
 
@@ -221,13 +220,17 @@ void network_init(void)
         wifi_network_t net;
         nvs_config_get_network(i, &net);
 
-        if (!net.auto_connect || net.ssid[0] == '\0') continue;
+        if (!net.auto_connect || net.ssid[0] == '\0')
+            continue;
 
         bool visible = (ap_list == NULL); // if malloc failed — try anyway
         for (uint16_t j = 0; j < ap_count && !visible; j++)
         {
             if (strcmp((char *)ap_list[j].ssid, net.ssid) == 0)
+            {
+                ESP_LOGI(TAG, "Network [%ld] '%s' found in scan results, RSSI=%d", (long)i, ap_list[j].ssid, ap_list[j].rssi);
                 visible = true;
+            }
         }
 
         if (!visible)

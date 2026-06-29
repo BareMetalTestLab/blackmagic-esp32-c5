@@ -53,15 +53,15 @@ void led_set_blue(uint8_t value);
 #undef PLATFORM_HAS_TRACESWO
 
 /* Runtime-configurable pin numbers (set before first use, default values in platform.c) */
-extern int32_t g_pin_swdio;
-extern int32_t g_pin_swclk;
+extern int32_t g_pin_tms_swdio;
+extern int32_t g_pin_tck_swclk;
 extern int32_t g_pin_tdi;
-extern int32_t g_pin_tdo;
+extern int32_t g_pin_tdo_swo;
 extern int32_t g_pin_trst;
 
-#define SWDIO_PIN   (g_pin_swdio)
-#define SWCLK_PIN   (g_pin_swclk)
-#define TRACESWO_PIN (g_pin_tdo)
+#define SWDIO_PIN   (g_pin_tms_swdio)
+#define SWCLK_PIN   (g_pin_tck_swclk)
+#define TRACESWO_PIN (g_pin_tdo_swo)
 
 /* Keep Black Magic style aliases: SWDIO/TMS and SWCLK/TCK share lines. */
 #define TMS_PORT   SWDIO_PORT
@@ -71,10 +71,10 @@ extern int32_t g_pin_trst;
 #define TRST_PORT  SWDIO_PORT
 
 /* 4-wire JTAG mapping — aliases of the runtime globals above */
-#define TMS_PIN  (g_pin_swdio)
+#define TMS_PIN  (g_pin_tms_swdio)
 #define TDI_PIN  (g_pin_tdi)
-#define TDO_PIN  (g_pin_tdo)
-#define TCK_PIN  (g_pin_swclk)
+#define TDO_PIN  (g_pin_tdo_swo)
+#define TCK_PIN  (g_pin_tck_swclk)
 #define TRST_PIN (g_pin_trst)
 
 #define gpio_set_val(port, pin, value)       \

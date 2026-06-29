@@ -93,7 +93,7 @@ execute_process(
 message(STATUS "BM version: ${BM_GIT_DESC}")
 
 idf_component_register(SRCS ${BM_SOURCES} ${BM_TARGETS}
-    INCLUDE_DIRS ${BM_INCLUDE} PRIV_REQUIRES esp_driver_gpio esp_timer
+    INCLUDE_DIRS ${BM_INCLUDE} PRIV_REQUIRES esp_driver_gpio esp_timer esp_driver_uart
     WHOLE_ARCHIVE)
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -DPC_HOSTED=0 -DFIRMWARE_VERSION="${BM_GIT_DESC}" -Wno-char-subscripts -Wno-attributes -std=gnu11)

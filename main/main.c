@@ -9,6 +9,7 @@
 #include "network.h"
 #include "network-gdb.h"
 #include "network-http.h"
+#include "network-serial.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -83,7 +84,9 @@ void app_main(void)
     network_init();
     network_gdb_server_init();
     network_http_server_init();
-    
+    // Initialize LP UART (TX=GPIO5, RX=GPIO4) and start welcome task
+    network_serial_init();
+
 #ifdef ENABLE_RTT
     network_rtt_server_init();
 #endif

@@ -7,6 +7,7 @@ Black Magic Probe firmware for ESP32-C5 (and other ESP32-Cx chips). Turns the bo
 | `80` | Web UI — OTA flash, Wi-Fi credentials, GPIO pin assignment |
 | `2345` | GDB remote serial protocol |
 | `2346` | Segger RTT console (optional, see [RTT](#rtt)) |
+| `2347` | Target serial (optional, see [Serial](#target-serial)) |
 
 All settings (Wi-Fi credentials, hostname, GPIO pins) are stored in NVS and persist across reboots. They can be changed at runtime through the web UI.
 
@@ -64,6 +65,18 @@ RTT support is compiled in by default (`-DENABLE_RTT=1` in `CMakeLists.txt`). En
 
 ```bash
 $ telnet blackmagic.local 2346
+# or
+$ nc blackmagic.local 2347
+```
+
+### Target Serial
+
+Connect to the target serial console in a separate terminal:
+
+```bash
+$ telnet blackmagic.local 2347
+# or
+$ nc blackmagic.local 2347
 ```
 
 ## Default GPIO Pin Mapping

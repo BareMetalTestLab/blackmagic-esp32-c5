@@ -184,7 +184,7 @@ static void wifi_switch_to_ap(const char *ssid, const char *pass)
     ESP_LOGI(TAG, "AP mode started: SSID=%s", ssid);
 }
 
-void network_init(void)
+int network_start(void)
 {
     s_wifi_event_group = xEventGroupCreate();
     s_wifi_scanning = true;
@@ -253,9 +253,11 @@ void network_init(void)
     {
         ESP_LOGW(TAG, "All STA connections failed, switching to AP mode");
         wifi_switch_to_ap("blackmagic", "blackmagic");
+        return 1;
     }
     else
     {
         ESP_LOGI(TAG, "Connected to WiFi as STA");
     }
+    return 0;
 }

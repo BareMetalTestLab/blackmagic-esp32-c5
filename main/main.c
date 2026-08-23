@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,9 +11,8 @@
 #include "network-gdb.h"
 #include "network-http.h"
 #include "network-serial.h"
-
-#include "lwip/err.h"
-#include "lwip/sys.h"
+#include <hal/gpio_ll.h>
+#include <driver/gpio.h>
 
 #include "gdb_main.h"
 #include "gdb_if.h"
@@ -26,11 +26,39 @@
 #include "rtt_if_esp32.h"
 #endif
 
+#define MD_PIN 7
+#define IDLE_PIN 8
+
+void support_gpio_init(void)
+{
+    uint32_t output_mask = 0;
+    if (MD_PIN >= 0)
+        output_mask |= (1U << MD_PIN);
+    if (IDLE_PIN >= 0)
+        output_mask |= (1U << IDLE_PIN);
+
+    if (output_mask != 0)
+    {
+        GPIO.enable_w1ts.val = output_mask;
+    }
+
+    if(MD_PIN >= 0)
+    {
+        esp_rom_gpio_connect_out_signal(MD_PIN, SIG_GPIO_OUT_IDX, false, false);
+        platform_gpio_set_level(MD_PIN, 0);
+    }
+    if(IDLE_PIN >= 0)
+    {
+        esp_rom_gpio_connect_out_signal(IDLE_PIN, SIG_GPIO_OUT_IDX, false, false);
+        platform_gpio_set_level(IDLE_PIN, 0);
+    }
+}
+
 void gdb_application_thread(void *pvParameters)
 {
     while (1)
     {
-        SET_IDLE_STATE(false);
+        platform_gpio_set_level(IDLE_PIN, 0);
         while (gdb_target_running && cur_target)
         {
             gdb_poll_target();
@@ -50,11 +78,11 @@ void gdb_application_thread(void *pvParameters)
             // platform_pace_poll();
         }
 
-        SET_IDLE_STATE(true);
+        platform_gpio_set_level(IDLE_PIN, 1);
         const gdb_packet_s *const packet = gdb_packet_receive();
         // If port closed and target detached, stay idle
         if (packet->data[0] != '\x04' || cur_target)
-            SET_IDLE_STATE(false);
+            platform_gpio_set_level(IDLE_PIN, 0);
         gdb_main(packet);
     }
 }
@@ -62,6 +90,7 @@ void gdb_application_thread(void *pvParameters)
 void app_main(void)
 {
     gdb_glue_init();
+    support_gpio_init();
 
     nvs_init();
 
@@ -80,8 +109,14 @@ void app_main(void)
     //        ----- <-    jtag/cdc       -> serial(LP UART) <- TCP port 2347
 
     // In release build jtag/cdc is not needed, so we can use cdc for serial output, because there are not enough uarts
-
-    network_init();
+    if(network_start() == 0)
+    {
+        platform_gpio_set_level(MD_PIN, 0);
+    }
+    else
+    {
+        platform_gpio_set_level(MD_PIN, 1);
+    }
     network_gdb_server_init();
     network_http_server_init();
     // Initialize LP UART (TX=GPIO5, RX=GPIO4) and start welcome task

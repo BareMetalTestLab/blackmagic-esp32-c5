@@ -80,8 +80,8 @@
         <div class='settings-form'>
             <h2>Known Networks</h2>
             <div id='networksList'></div>
-            <div id='addNetworkForm' style='display:none; margin-top:16px; padding-top:16px; border-top:1px solid #ddd;'>
-                <h3 style='margin-top:0;'>Add New Network</h3>
+            <div id='addNetworkForm' class='network-edit-form' style='display:none;'>
+                <h3>Add New Network</h3>
                 <form id='addNetFormEl'>
                     <div class='form-group'>
                         <label for='newSsid'>SSID:</label>
@@ -103,15 +103,15 @@
                     </div>
                 </form>
             </div>
-            <button type='button' id='addNetworkBtn' style='margin-top:16px;'>+ Add Network</button>
-            <div id='networksStatus' style='margin-top:12px;'></div>
+            <button type='button' id='addNetworkBtn'>+ Add Network</button>
+            <div id='networksStatus'></div>
         </div>
     </div>
 
     <!-- Settings Tab Content -->
     <div class="tab-content" id="settings-tab">
 
-        <div class='settings-form' style='margin-top:24px;'>
+        <div class='settings-form'>
             <h2>Pin Configuration</h2>
             <form id='pinsForm'>
                 <div class='pin-grid'>

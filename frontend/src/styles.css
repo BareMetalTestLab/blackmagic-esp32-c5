@@ -1,3 +1,13 @@
+:root {
+    --accent: #4CAF50;
+    --accent-hover: #45a049;
+    --accent-bg: #f0f8f0;
+    --border-color: #ddd;
+    --transition: all 0.3s ease;
+    --radius-sm: 5px;
+    --radius-lg: 10px;
+}
+
 body {
     font-family: Arial, sans-serif;
     max-width: 700px;
@@ -19,7 +29,7 @@ body {
     font-size: 24px;
     cursor: pointer;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    transition: all 0.3s ease;
+    transition: var(--transition);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -50,14 +60,18 @@ h1 {
 .upload-form {
     border: 2px dashed #ccc;
     padding: 30px;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     text-align: center;
-    transition: all 0.3s ease;
+    transition: var(--transition);
+}
+
+.upload-form.drag-over,
+.drop-zone.drag-over {
+    border-color: var(--accent);
+    background-color: var(--accent-bg);
 }
 
 .upload-form.drag-over {
-    border-color: #4caf50;
-    background-color: #f0f8f0;
     transform: scale(1.02);
 }
 
@@ -65,10 +79,10 @@ h1 {
     padding: 40px;
     margin: 20px 0;
     border: 2px dashed #ccc;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     background-color: #fafafa;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: var(--transition);
 }
 
 .drop-zone:hover {
@@ -77,8 +91,6 @@ h1 {
 }
 
 .drop-zone.drag-over {
-    border-color: #4caf50;
-    background-color: #f0f8f0;
     border-width: 3px;
 }
 
@@ -97,7 +109,7 @@ h1 {
     margin: 15px 0;
     padding: 10px;
     background-color: #f0f0f0;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     font-size: 14px;
     color: #333;
 }
@@ -110,12 +122,6 @@ input[type='file'] {
     margin: 20px 0;
 }
 
-.addr-input label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-}
-
 .addr-input input {
     padding: 8px;
     font-family: monospace;
@@ -124,12 +130,6 @@ input[type='file'] {
 
 .iface-select {
     margin: 20px 0;
-}
-
-.iface-select > label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: bold;
 }
 
 .radio-group {
@@ -156,17 +156,18 @@ input[type='file'] {
 }
 
 button {
-    background-color: #4CAF50;
+    background-color: var(--accent);
     color: white;
     padding: 12px 30px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 16px;
+    transition: var(--transition);
 }
 
 button:hover {
-    background-color: #45a049;
+    background-color: var(--accent-hover);
 }
 
 button:disabled {
@@ -174,13 +175,21 @@ button:disabled {
     cursor: not-allowed;
 }
 
-#status {
+#status,
+#settingsStatus,
+#pinsStatus,
+#networksStatus {
     margin-top: 20px;
     padding: 10px;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
 }
 
-.success {
+#settingsStatus {
+    text-align: center;
+}
+
+.success,
+.badge-auto {
     background-color: #d4edda;
     color: #155724;
     border: 1px solid #c3e6cb;
@@ -202,21 +211,21 @@ button:disabled {
     width: 100%;
     height: 20px;
     background-color: #f3f3f3;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     margin-top: 10px;
     overflow: hidden;
 }
 
 .progress-bar {
     height: 100%;
-    background-color: #4CAF50;
+    background-color: var(--accent);
     transition: width 0.3s;
 }
 
 .advanced-settings {
     margin: 20px 0;
-    border: 1px solid #ddd;
-    border-radius: 5px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
     padding: 10px;
     background-color: #f9f9f9;
 }
@@ -234,7 +243,7 @@ button:disabled {
 }
 
 .advanced-settings[open] summary {
-    color: #4CAF50;
+    color: var(--accent);
     margin-bottom: 15px;
 }
 
@@ -247,7 +256,7 @@ button:disabled {
     display: flex;
     gap: 10px;
     margin-bottom: 20px;
-    border-bottom: 2px solid #ddd;
+    border-bottom: 2px solid var(--border-color);
 }
 
 .tab-button {
@@ -258,7 +267,7 @@ button:disabled {
     border-bottom: 3px solid transparent;
     cursor: pointer;
     font-size: 16px;
-    transition: all 0.3s ease;
+    transition: var(--transition);
     border-radius: 0;
 }
 
@@ -268,8 +277,8 @@ button:disabled {
 }
 
 .tab-button.active {
-    color: #4CAF50;
-    border-bottom-color: #4CAF50;
+    color: var(--accent);
+    border-bottom-color: var(--accent);
     background-color: transparent;
 }
 
@@ -283,9 +292,10 @@ button:disabled {
 
 /* Settings Form */
 .settings-form {
-    border: 2px solid #ddd;
+    margin-top: 24px;
+    border: 2px solid var(--border-color);
     padding: 30px;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     background-color: #fafafa;
 }
 
@@ -299,6 +309,8 @@ button:disabled {
     margin-bottom: 20px;
 }
 
+.addr-input label,
+.iface-select > label,
 .form-group label {
     display: block;
     margin-bottom: 8px;
@@ -309,34 +321,28 @@ button:disabled {
 .form-group input {
     width: 100%;
     padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 5px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
     font-size: 14px;
     box-sizing: border-box;
 }
 
 .form-group input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: var(--accent);
     box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
 }
 
-.settings-form button[type="submit"] {
+#saveSettingsBtn,
+#savePinsBtn {
     width: 100%;
     margin-top: 25px;
 }
 
-#settingsStatus {
-    margin-top: 20px;
-    padding: 10px;
-    border-radius: 5px;
-    text-align: center;
-}
-
 /* Network cards */
 .network-card {
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
     padding: 12px 16px;
     margin-bottom: 10px;
     background: #fff;
@@ -364,12 +370,6 @@ button:disabled {
     white-space: nowrap;
 }
 
-.badge-auto {
-    background-color: #d4edda;
-    color: #155724;
-    border: 1px solid #c3e6cb;
-}
-
 .badge-manual {
     background-color: #e2e3e5;
     color: #383d41;
@@ -384,7 +384,7 @@ button:disabled {
 .btn-small {
     padding: 5px 14px;
     font-size: 13px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 .btn-edit {
@@ -419,12 +419,21 @@ button:disabled {
 
 .btn-row button {
     flex: 1;
+    margin-top: 0;
 }
 
 .network-edit-form {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid #eee;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.network-edit-form h3 {
+    margin-top: 0;
+}
+
+#addNetworkBtn {
+    margin-top: 16px;
 }
 
 .checkbox-group label {
@@ -439,4 +448,3 @@ button:disabled {
     width: auto;
     margin: 0;
 }
-

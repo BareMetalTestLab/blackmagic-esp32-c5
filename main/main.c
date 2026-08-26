@@ -11,7 +11,7 @@
 #include "network-gdb.h"
 #include "network-http.h"
 #include "network-serial.h"
-#ifdef ENABLE_UART_GDB
+#ifdef ENABLE_USB_GDB
 #    include "uart-gdb.h"
 #endif
 #include <hal/gpio_ll.h>
@@ -119,7 +119,7 @@ void app_main(void)
         platform_gpio_set_level(MD_PIN, 1);
     }
     network_gdb_server_init();
-#ifdef ENABLE_UART_GDB
+#ifdef ENABLE_USB_GDB
     // GDB server on UART0 (115200), same port as the console
     uart_gdb_server_init();
 #endif

@@ -25,7 +25,7 @@ static GDBGlue gdb_glue;
 bool network_gdb_connected(void);
 void network_gdb_send(uint8_t *buffer, size_t size);
 
-#ifdef ENABLE_UART_GDB
+#ifdef ENABLE_USB_GDB
 /* GDB over UART */
 bool uart_gdb_connected(void);
 void uart_gdb_send(uint8_t *buffer, size_t size);
@@ -103,7 +103,7 @@ unsigned char gdb_if_getchar(void)
 
 void gdb_if_putchar(unsigned char c, int flush)
 {
-#ifdef ENABLE_UART_GDB
+#ifdef ENABLE_USB_GDB
     bool uart_active = uart_gdb_connected();
 #else
     bool uart_active = false;
@@ -117,7 +117,7 @@ void gdb_if_putchar(unsigned char c, int flush)
         {
             if (network_gdb_connected())
                 network_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
-#ifdef ENABLE_UART_GDB
+#ifdef ENABLE_USB_GDB
             if (uart_active)
                 uart_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
 #endif

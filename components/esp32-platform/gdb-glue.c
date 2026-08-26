@@ -25,6 +25,12 @@ static GDBGlue gdb_glue;
 bool network_gdb_connected(void);
 void network_gdb_send(uint8_t *buffer, size_t size);
 
+#ifdef ENABLE_UART_GDB
+/* GDB over UART */
+bool uart_gdb_connected(void);
+void uart_gdb_send(uint8_t *buffer, size_t size);
+#endif
+
 /* USB-CDC */
 void usb_gdb_tx_char(uint8_t c, bool flush);
 
@@ -80,7 +86,6 @@ unsigned char gdb_if_getchar_to(int timeout)
     {
         return -1;
     }
-
     if (gdb_glue.rx_stream_full &&
         xStreamBufferSpacesAvailable(gdb_glue.rx_stream) >= GDB_RX_PACKET_MAX_SIZE)
     {
@@ -98,6 +103,11 @@ unsigned char gdb_if_getchar(void)
 
 void gdb_if_putchar(unsigned char c, int flush)
 {
+#ifdef ENABLE_UART_GDB
+    bool uart_active = uart_gdb_connected();
+#else
+    bool uart_active = false;
+#endif
     if (network_gdb_connected())
     {
         gdb_glue.tx_buffer[gdb_glue.tx_buffer_index] = c;
@@ -105,9 +115,18 @@ void gdb_if_putchar(unsigned char c, int flush)
 
         if (gdb_glue.tx_buffer_index == GDB_TX_BUFFER_SIZE || flush)
         {
-            network_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
+            if (network_gdb_connected())
+                network_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
+#ifdef ENABLE_UART_GDB
+            if (uart_active)
+                uart_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
+#endif
             gdb_glue.tx_buffer_index = 0;
         }
+    }
+    else if(uart_active)
+    {
+        uart_gdb_send(&c, 1);
     }
     else
     {

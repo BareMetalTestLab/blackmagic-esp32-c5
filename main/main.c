@@ -11,6 +11,9 @@
 #include "network-gdb.h"
 #include "network-http.h"
 #include "network-serial.h"
+#ifdef ENABLE_UART_GDB
+#    include "uart-gdb.h"
+#endif
 #include <hal/gpio_ll.h>
 #include <driver/gpio.h>
 
@@ -21,9 +24,9 @@
 #include "nvs-config.h"
 
 #ifdef ENABLE_RTT
-#include "network-rtt.h"
-#include "rtt.h"
-#include "rtt_if_esp32.h"
+#    include "network-rtt.h"
+#    include "rtt.h"
+#    include "rtt_if_esp32.h"
 #endif
 
 #define MD_PIN 7
@@ -42,19 +45,19 @@ void support_gpio_init(void)
         GPIO.enable_w1ts.val = output_mask;
     }
 
-    if(MD_PIN >= 0)
+    if (MD_PIN >= 0)
     {
         esp_rom_gpio_connect_out_signal(MD_PIN, SIG_GPIO_OUT_IDX, false, false);
         platform_gpio_set_level(MD_PIN, 0);
     }
-    if(IDLE_PIN >= 0)
+    if (IDLE_PIN >= 0)
     {
         esp_rom_gpio_connect_out_signal(IDLE_PIN, SIG_GPIO_OUT_IDX, false, false);
         platform_gpio_set_level(IDLE_PIN, 0);
     }
 }
 
-void gdb_application_thread(void *pvParameters)
+void gdb_application_thread(void* pvParameters)
 {
     while (1)
     {
@@ -79,7 +82,7 @@ void gdb_application_thread(void *pvParameters)
         }
 
         platform_gpio_set_level(IDLE_PIN, 1);
-        const gdb_packet_s *const packet = gdb_packet_receive();
+        const gdb_packet_s* const packet = gdb_packet_receive();
         // If port closed and target detached, stay idle
         if (packet->data[0] != '\x04' || cur_target)
             platform_gpio_set_level(IDLE_PIN, 0);
@@ -107,7 +110,7 @@ void app_main(void)
     //        ----- <-    jtag/cdc       -> serial(LP UART) <- TCP port 2347
 
     // In release build jtag/cdc is not needed, so we can use cdc for serial output, because there are not enough uarts
-    if(network_start() == 0)
+    if (network_start() == 0)
     {
         platform_gpio_set_level(MD_PIN, 0);
     }
@@ -116,6 +119,10 @@ void app_main(void)
         platform_gpio_set_level(MD_PIN, 1);
     }
     network_gdb_server_init();
+#ifdef ENABLE_UART_GDB
+    // GDB server on UART0 (115200), same port as the console
+    uart_gdb_server_init();
+#endif
     network_http_server_init();
     // Initialize LP UART (TX=GPIO5, RX=GPIO4) and start welcome task
     network_serial_init();

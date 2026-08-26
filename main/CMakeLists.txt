@@ -13,9 +13,10 @@ idf_component_register(SRCS
     "network-http.c"
     "network-rtt.c"
     "network-serial.c"
+    "uart-gdb.c"
     "nvs.c"
     "nvs-config.c"
-    PRIV_REQUIRES esp_wifi esp_https_server nvs_flash esp_driver_uart esp_driver_gpio
+    PRIV_REQUIRES esp_wifi esp_https_server nvs_flash esp_driver_uart esp_driver_gpio esp_driver_usb_serial_jtag
     INCLUDE_DIRS "." "${CMAKE_SOURCE_DIR}/frontend/dist")
 
 # Generate frontend header file

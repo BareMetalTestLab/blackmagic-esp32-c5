@@ -18,7 +18,7 @@ idf.py build
 idf.py flash monitor
 ```
 
-All configuration in `sdkconfig.defaults` is applied automatically on first build. The frontend (`npm install` + build) is also handled automatically by CMake — no manual steps needed.
+All configuration in `sdkconfig.defaults` is applied automatically on first build (`sdkconfig` itself is generated and gitignored). To re-apply edited defaults to an existing checkout, delete `sdkconfig` and rebuild. The frontend (`npm install` + build) is also handled automatically by CMake — no manual steps needed.
 
 ### Building for a different chip
 
@@ -29,9 +29,12 @@ idf.py build
 
 ### Why these sdkconfig.defaults settings
 
+| Setting | Reason |
+| --- | --- |
 | `PARTITION_TABLE_SINGLE_APP_LARGE` (3 MB) | Firmware with all BMP targets exceeds 1 MB |
 | `WHOLE_ARCHIVE` on esp32-platform component | Forces strong symbols from target probe files to win over weak stubs in `target_probe.c` |
 | `CONFIG_ESP_INT_WDT=n`, `CONFIG_ESP_TASK_WDT_EN=n` | Flash and target probe operations exceed the default watchdog timeout |
+| `CONFIG_ESP_CONSOLE_UART_DEFAULT=y`, `CONFIG_ESP_CONSOLE_SECONDARY_NONE=y` | Console and logs on UART0 only, keeping the USB-Serial-JTAG peripheral free for GDB over USB |
 
 ## Wi-Fi
 
@@ -53,6 +56,24 @@ $ arm-none-eabi-gdb firmware.elf
 (gdb) monitor swdp_scan
 (gdb) attach 1
 ```
+
+### GDB over USB (USB-Serial-JTAG)
+
+The same GDB server is also available over the built-in USB port — no Wi-Fi needed. Console logs stay on UART0, the USB peripheral is dedicated to GDB.
+
+Linux:
+
+```bash
+(gdb) target extended-remote /dev/ttyACM0
+```
+
+macOS (list your device with `ls /dev/cu.usbmodem*`):
+
+```bash
+(gdb) target extended-remote /dev/cu.usbmodemXXXX
+```
+
+All `monitor` commands (`swdp_scan`, `rtt enable`, …) work the same as over Wi-Fi.
 
 ### RTT
 

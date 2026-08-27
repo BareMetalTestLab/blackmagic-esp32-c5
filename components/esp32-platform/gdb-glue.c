@@ -105,8 +105,6 @@ void gdb_if_putchar(unsigned char c, int flush)
 {
 #ifdef ENABLE_USB_GDB
     bool uart_active = uart_gdb_connected();
-#else
-    bool uart_active = false;
 #endif
     if (network_gdb_connected())
     {
@@ -117,17 +115,15 @@ void gdb_if_putchar(unsigned char c, int flush)
         {
             if (network_gdb_connected())
                 network_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
-#ifdef ENABLE_USB_GDB
-            if (uart_active)
-                uart_gdb_send(gdb_glue.tx_buffer, gdb_glue.tx_buffer_index);
-#endif
             gdb_glue.tx_buffer_index = 0;
         }
     }
+#ifdef ENABLE_USB_GDB
     else if(uart_active)
     {
         uart_gdb_send(&c, 1);
     }
+#endif
     else
     {
     }

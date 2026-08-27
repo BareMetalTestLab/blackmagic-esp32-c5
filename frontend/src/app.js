@@ -388,6 +388,39 @@ pinsForm.addEventListener('submit', async (e) => {
     }
 });
 
+// Reset pins to hardware defaults: send command, then read back the values that were set
+document.getElementById('defaultPinsBtn').addEventListener('click', async () => {
+    const defaultPinsBtn = document.getElementById('defaultPinsBtn');
+    pinsStatus.textContent = 'Applying default pins...';
+    pinsStatus.className = 'info';
+    defaultPinsBtn.disabled = true;
+
+    try {
+        // No parameters: the ESP32 applies the defaults hardcoded in firmware
+        const response = await fetch('/pins-default', {
+            method: 'POST'
+        });
+
+        if (!response.ok) throw new Error('Failed to apply default pins');
+        const result = await response.json();
+
+        if (result.success) {
+            await loadPins();  // receive the values that were actually set
+            pinsStatus.textContent = '✓ Default pins applied!';
+            pinsStatus.className = 'success';
+        } else {
+            pinsStatus.textContent = '✗ ' + (result.error || 'Failed to apply default pins');
+            pinsStatus.className = 'error';
+        }
+    } catch (error) {
+        pinsStatus.textContent = '✗ Error: ' + error.message;
+        pinsStatus.className = 'error';
+    } finally {
+        defaultPinsBtn.disabled = false;
+        setTimeout(() => { pinsStatus.textContent = ''; pinsStatus.className = ''; }, 4000);
+    }
+});
+
 /* ── Networks ── */
 
 function escapeHtml(str) {

@@ -21,6 +21,7 @@ esp_err_t nvs_settings_get_handler(httpd_req_t *req);
 esp_err_t reboot_post_handler(httpd_req_t *req);
 
 esp_err_t pins_post_handler(httpd_req_t *req);
+esp_err_t pins_default_post_handler(httpd_req_t *req);
 esp_err_t pins_get_handler(httpd_req_t *req);
 
 esp_err_t networks_get_handler(httpd_req_t *req);
@@ -89,6 +90,11 @@ static const httpd_uri_t pins_post_uri = {
     .method = HTTP_POST,
     .handler = pins_post_handler};
 
+static const httpd_uri_t pins_default_post_uri = {
+    .uri = "/pins-default",
+    .method = HTTP_POST,
+    .handler = pins_default_post_handler};
+
 static const httpd_uri_t networks_get_uri = {
     .uri = "/networks",
     .method = HTTP_GET,
@@ -137,6 +143,7 @@ static httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &reboot_uri);
     httpd_register_uri_handler(server, &pins_get_uri);
     httpd_register_uri_handler(server, &pins_post_uri);
+    httpd_register_uri_handler(server, &pins_default_post_uri);
     httpd_register_uri_handler(server, &networks_get_uri);
     httpd_register_uri_handler(server, &networks_add_uri);
     httpd_register_uri_handler(server, &networks_update_uri);

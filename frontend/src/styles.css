@@ -334,7 +334,8 @@ button:disabled {
 }
 
 #saveSettingsBtn,
-#savePinsBtn {
+#savePinsBtn,
+#defaultPinsBtn {
     width: 100%;
     margin-top: 25px;
 }

@@ -17,11 +17,11 @@ uint32_t target_clk_divider = 0;
 
 /* Default pin assignments — can be overridden at runtime via nvs-config */
 /* TODO: ESP32-C6 devkits:GPIO 4–7 are claimed by the built-in USB-JTAG controller — avoid those pins. */
-int32_t g_pin_tms_swdio = 26;
-int32_t g_pin_tck_swclk = 25;
-int32_t g_pin_tdi = 23;
-int32_t g_pin_tdo_swo = 24;
-int32_t g_pin_trst = 27;
+int32_t g_pin_tms_swdio = DEFAULT_TMS_PIN;
+int32_t g_pin_tck_swclk = DEFAULT_TCK_PIN;
+int32_t g_pin_tdi = DEFAULT_TDI_PIN;
+int32_t g_pin_tdo_swo = DEFAULT_TDO_PIN;
+int32_t g_pin_trst = DEFAULT_TRST_PIN;
 
 // static const char* TAG = "gdb-platform";
 

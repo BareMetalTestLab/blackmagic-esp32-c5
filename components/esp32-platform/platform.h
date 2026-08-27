@@ -53,6 +53,13 @@ void led_set_blue(uint8_t value);
 #undef PLATFORM_HAS_TRACESWO
 
 /* Runtime-configurable pin numbers (set before first use, default values in platform.c) */
+
+#define DEFAULT_TMS_PIN 26
+#define DEFAULT_TCK_PIN 25
+#define DEFAULT_TDI_PIN 23
+#define DEFAULT_TDO_PIN 24
+#define DEFAULT_TRST_PIN 27
+
 extern int32_t g_pin_tms_swdio;
 extern int32_t g_pin_tck_swclk;
 extern int32_t g_pin_tdi;

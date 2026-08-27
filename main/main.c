@@ -105,9 +105,9 @@ void app_main(void)
     // 2. (UART1) uart to usb: for rtt
     // 3. (LP UART) uart to serial: for target serial output (optional)
 
-    //        ----- <- (USB2TTL) - UART0 ->       gdb       <- TCP port 2345
+    //        ----- <-    jtag/cdc       ->       gdb       <- TCP port 2345
     // USB - | HUB |<- (USB2TTL) - UART1 ->       rtt       <- TCP port 2346
-    //        ----- <-    jtag/cdc       -> serial(LP UART) <- TCP port 2347
+    //        ----- <- (USB2TTL) - UART0 -> serial(LP UART) <- TCP port 2347
 
     // In release build jtag/cdc is not needed, so we can use cdc for serial output, because there are not enough uarts
     if (network_start() == 0)

@@ -83,6 +83,25 @@ esp_err_t pins_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t pins_default_post_handler(httpd_req_t *req)
+{
+    // Apply immediately
+    g_pin_tms_swdio = DEFAULT_TMS_PIN;
+    g_pin_tck_swclk = DEFAULT_TCK_PIN;
+    g_pin_tdi = DEFAULT_TDI_PIN;
+    g_pin_tdo_swo = DEFAULT_TDO_PIN;
+    g_pin_trst = DEFAULT_TRST_PIN;
+
+    nvs_config_set_pins(g_pin_tms_swdio, g_pin_tck_swclk, g_pin_tdi, g_pin_tdo_swo, g_pin_trst);
+
+    ESP_LOGI(TAG, "Pins updated: SWDIO=%ld SWCLK=%ld TDI=%ld TDO=%ld TRST=%ld",
+             (long)g_pin_tms_swdio, (long)g_pin_tck_swclk, (long)g_pin_tdi, (long)g_pin_tdo_swo, (long)g_pin_trst);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 /* Pins POST handler */
 esp_err_t pins_post_handler(httpd_req_t *req)
 {

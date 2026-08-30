@@ -13,6 +13,7 @@
 #include "network-serial.h"
 #ifdef ENABLE_USB_GDB
 #    include "uart-gdb.h"
+#    include "uart-rtt.h"
 #endif
 #include <hal/gpio_ll.h>
 #include <driver/gpio.h>
@@ -120,8 +121,10 @@ void app_main(void)
     }
     network_gdb_server_init();
 #ifdef ENABLE_USB_GDB
-    // GDB server on UART0 (115200), same port as the console
+    // GDB server on JTAG/CDC, UART0 port as the console
     uart_gdb_server_init();
+    // RTT server on UART1
+    uart_rtt_server_init();
 #endif
     network_http_server_init();
     // Initialize LP UART (TX=GPIO5, RX=GPIO4) and start welcome task

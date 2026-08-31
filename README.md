@@ -77,7 +77,7 @@ All `monitor` commands (`swdp_scan`, `rtt enable`, …) work the same as over Wi
 
 ### RTT
 
-RTT support is compiled in by default (`-DENABLE_RTT=1` in `CMakeLists.txt`). Enable it from the GDB session while the target is attached, then connect in a separate terminal:
+RTT support is compiled in by default (`-DENABLE_RTT=1` in `CMakeLists.txt`). `ENABLE_RTT` is definition of BlackMagic. Enable it from the GDB session while the target is attached, then connect in a separate terminal:
 
 ```bash
 (gdb) monitor rtt enable
@@ -87,7 +87,18 @@ RTT support is compiled in by default (`-DENABLE_RTT=1` in `CMakeLists.txt`). En
 ```bash
 $ telnet blackmagic.local 2346
 # or
-$ nc blackmagic.local 2347
+$ nc blackmagic.local 2346
+```
+
+Use `-DENABLE_USB_GDB=1` for enable rtt by USB serial. 
+It uses the *senior* port in `/dev`:
+- `cu.usbmodem1`
+- `cu.usbmodem3` - it's yours
+
+```bash
+socat - "/dev/cu.usbmodemXXXX,raw,echo=0,ispeed=115200,ospeed=115200"
+# or
+minicom # or ect.
 ```
 
 ### Target Serial
@@ -100,17 +111,30 @@ $ telnet blackmagic.local 2347
 $ nc blackmagic.local 2347
 ```
 
+Use `-DENABLE_USB_GDB=1` and `-DENABLE_UART_SERIAL=1` for enable serial by USB serial. 
+It uses the *minor* port in `/dev`:
+- `cu.usbmodem1` - it's yours
+- `cu.usbmodem3`
+
+```bash
+socat - "/dev/cu.usbmodemXXXX,raw,echo=0,ispeed=115200,ospeed=115200"
+# or
+minicom # or ect.
+```
+
+TODO! This port is used for ESP logging. Currently, they are conflicting. Will logging be disabled, or will the serial data be integrated into the logs?
+
 ## Default GPIO Pin Mapping
 
 All pins are overridable at runtime through the web UI (stored in NVS).
 
 | Signal | GPIO |
 | --- | --- |
-| SWDIO / TMS | 23 |
-| SWCLK / TCK | 24 |
-| TDI | 28 |
-| TDO / TRACESWO | 27 |
-| TRST | 25 |
+| SWDIO / TMS | 26 |
+| SWCLK / TCK | 25 |
+| TDI | 23 |
+| TDO / TRACESWO | 24 |
+| TRST | 27 |
 
 SWD and JTAG share SWDIO/TMS and SWCLK/TCK lines (standard Black Magic Probe convention).
 

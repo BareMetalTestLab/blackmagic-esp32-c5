@@ -11,6 +11,9 @@
 #include "network-gdb.h"
 #include "network-http.h"
 #include "network-serial.h"
+#ifdef ENABLE_UART_SERIAL
+#    include "uart-serial.h"
+#endif
 #ifdef ENABLE_USB_GDB
 #    include "uart-gdb.h"
 #    include "uart-rtt.h"
@@ -127,8 +130,13 @@ void app_main(void)
     uart_rtt_server_init();
 #endif
     network_http_server_init();
-    // Initialize LP UART (TX=GPIO5, RX=GPIO4) and start welcome task
+#ifdef ENABLE_UART_SERIAL
+    // Serial bridge UART0 <-> LP UART (replaces the TCP serial server on port 2347)
+    uart_serial_init();
+#else
+    // Serial bridge TCP 2347 <-> LP UART
     network_serial_init();
+#endif
 
 #ifdef ENABLE_RTT
     network_rtt_server_init();

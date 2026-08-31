@@ -8,6 +8,8 @@ add_definitions(-DNO_LIBOPENCM3)
 add_definitions(-DENABLE_RTT=1)
 # GDB server over USB-CDC, shares the console port
 add_definitions(-DENABLE_USB_GDB=1)
+# Serial bridge UART0 <-> LP UART
+# add_definitions(-DENABLE_UART_SERIAL=1)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.

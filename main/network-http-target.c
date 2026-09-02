@@ -13,15 +13,15 @@ typedef struct
 {
     uint32_t base_addr;
     bool use_swd; // true = SWD, false = JTAG
-} flash_params_t;
+} connection_params_t;
 
-static flash_params_t flash_params = {
+static connection_params_t connection_params = {
     .base_addr = FLASH_BASE_ADDR,
     .use_swd = true, // Default to SWD
 };
 
 /* Flash parameters configuration handler */
-esp_err_t flash_params_post_handler(httpd_req_t *req)
+esp_err_t connection_params_post_handler(httpd_req_t *req)
 {
     char content[256];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -47,7 +47,7 @@ esp_err_t flash_params_post_handler(httpd_req_t *req)
         uint32_t new_addr = strtoul(base_addr_str, NULL, 0);
         if (new_addr != 0)
         {
-            flash_params.base_addr = new_addr;
+            connection_params.base_addr = new_addr;
             params_ok = true;
         }
     }
@@ -55,22 +55,22 @@ esp_err_t flash_params_post_handler(httpd_req_t *req)
     if (httpd_query_key_value(content, "iface", iface_str, sizeof(iface_str)) == ESP_OK)
     {
         if (strncmp(iface_str, "swd", 3) == 0)
-            flash_params.use_swd = true;
+            connection_params.use_swd = true;
         else if (strncmp(iface_str, "jtag", 4) == 0)
-            flash_params.use_swd = false;
+            connection_params.use_swd = false;
         params_ok = true;
     }
 
     if (params_ok)
     {
         ESP_LOGI(TAG, "Flash parameters updated: base_addr=0x%08lX, iface=%s",
-                 flash_params.base_addr, flash_params.use_swd ? "SWD" : "JTAG");
+                 connection_params.base_addr, connection_params.use_swd ? "SWD" : "JTAG");
 
         httpd_resp_set_type(req, "application/json");
         char resp[128];
         snprintf(resp, sizeof(resp),
                  "{\"success\":true,\"baseAddr\":\"0x%08lX\",\"iface\":\"%s\"}",
-                 flash_params.base_addr, flash_params.use_swd ? "swd" : "jtag");
+                 connection_params.base_addr, connection_params.use_swd ? "swd" : "jtag");
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
@@ -108,7 +108,7 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     bool success = false;
     bool headers_parsed = false;
     const char *error_msg = "Error: Flash operation failed";
-    uint32_t flash_base_addr = flash_params.base_addr; // Use stored parameters
+    uint32_t flash_base_addr = connection_params.base_addr; // Use stored parameters
 
     ESP_LOGI(TAG, "Starting streaming firmware flash, content size: %zu bytes", content_length);
 
@@ -192,10 +192,10 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     }
 
     bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", flash_params.use_swd ? "SWD" : "JTAG");
-    if (flash_params.use_swd ? adiv5_swd_scan() : jtag_scan())
+    ESP_LOGI(TAG, "Scanning via %s...", connection_params.use_swd ? "SWD" : "JTAG");
+    if (connection_params.use_swd ? adiv5_swd_scan() : jtag_scan())
     {
-        ESP_LOGI(TAG, "Target found via %s", flash_params.use_swd ? "SWD" : "JTAG");
+        ESP_LOGI(TAG, "Target found via %s", connection_params.use_swd ? "SWD" : "JTAG");
         target_found = true;
     }
 
@@ -369,6 +369,111 @@ cleanup_early:
     if (success)
     {
         const char *resp = "Firmware flashed successfully";
+        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    else
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        return ESP_FAIL;
+    }
+}
+
+/* Flash erase handler */
+esp_err_t erase_post_handler(httpd_req_t *req)
+{
+    target_s *target = NULL;
+    bool success = false;
+    const char *error_msg = "Error: Flash operation failed";
+    uint32_t flash_base_addr = connection_params.base_addr; // Use stored parameters
+    size_t erase_len = 1024 * 1024; // Erase 1 MB from the base address
+
+    // Step 1: Enable noack mode and reset the target via GDB packets
+    char cmd_reset[] = "$qRcmd,7265736574#37";
+    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+
+    extern target_s *target_list;
+    int try = 5;
+    while (target_list && try-- > 0)
+    {
+        ESP_LOGI(TAG, "Wait for target to halt...");
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+    }
+
+    // Step 2: Scan for target
+    bool target_found = false;
+    ESP_LOGI(TAG, "Scanning via %s...", connection_params.use_swd ? "SWD" : "JTAG");
+    if (connection_params.use_swd ? adiv5_swd_scan() : jtag_scan())
+    {
+        ESP_LOGI(TAG, "Target found via %s", connection_params.use_swd ? "SWD" : "JTAG");
+        target_found = true;
+    }
+
+    if (!target_found)
+    {
+        ESP_LOGE(TAG, "No target found!");
+        error_msg = "Error: No target device found";
+        goto cleanup_early;
+    }
+
+    // Step 3: Attach to target
+    target = target_attach_n(1, NULL);
+    if (!target)
+    {
+        ESP_LOGE(TAG, "Failed to attach to target");
+        gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+
+        error_msg = "Error: Failed to attach to target";
+        goto cleanup_early;
+    }
+
+    ESP_LOGI(TAG, "Successfully attached to target");
+
+    // Step 4: Halt the target
+    target_halt_request(target);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    target_halt_reason_e halt_reason = target_halt_poll(target, NULL);
+    if (halt_reason == TARGET_HALT_RUNNING || halt_reason == TARGET_HALT_ERROR)
+    {
+        ESP_LOGE(TAG, "Failed to halt target");
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Target halted");
+
+    // Step 5: Erase flash
+    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", flash_base_addr, erase_len);
+    if (!target_flash_erase(target, flash_base_addr, erase_len))
+    {
+        ESP_LOGE(TAG, "Flash erase failed");
+        error_msg = "Error: Flash erase failed";
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Flash erased successfully");
+
+    // Step 6: Reset and resume the target
+    target_reset(target);
+    target_halt_resume(target, false);
+
+    success = true;
+
+cleanup:
+    if (target)
+    {
+        target_detach(target);
+    }
+    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+cleanup_early:
+    char pkt_disable_noack[] = "\x04";
+    gdb_glue_receive((uint8_t *)pkt_disable_noack, 1);
+
+    if (success)
+    {
+        const char *resp = "Flash erased successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }

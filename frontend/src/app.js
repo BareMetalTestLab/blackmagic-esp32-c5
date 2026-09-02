@@ -138,7 +138,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
     const iface = document.querySelector('input[name="iface"]:checked').value;
     
     try {
-        const paramsResponse = await fetch('/flash-params', {
+        const paramsResponse = await fetch('/connection-params', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -213,6 +213,102 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
         status.textContent = '✗ Upload failed: ' + error.message;
         status.className = 'error';
         uploadBtn.disabled = false;
+    }
+});
+
+// Erase flash button functionality
+document.getElementById('eraseBtn').addEventListener('click', async () => {
+    const eraseBtn = document.getElementById('eraseBtn');
+    const status = document.getElementById('status');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+
+    eraseBtn.disabled = true;
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+
+    // Step 1: Always send connection parameters before erase
+    status.textContent = 'Setting flash parameters...';
+    status.className = 'info';
+
+    const baseAddr = document.getElementById('baseAddr').value;
+    const iface = document.querySelector('input[name="iface"]:checked').value;
+
+    const reenableBtn = () => {
+        eraseBtn.disabled = false;
+    };
+
+    const resetProgress = () => {
+        progressBar.style.width = '0%';
+        progressContainer.style.display = 'none';
+        reenableBtn();
+    };
+
+    try {
+        const paramsResponse = await fetch('/connection-params', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
+        });
+
+        if (!paramsResponse.ok) {
+            const errorText = await paramsResponse.text();
+            status.textContent = '✗ Failed to set parameters: ' + errorText;
+            status.className = 'error';
+            resetProgress();
+            return;
+        }
+
+        const result = await paramsResponse.json();
+        if (!result.success) {
+            status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
+            status.className = 'error';
+            resetProgress();
+            return;
+        }
+
+        console.log('Flash parameters set:', result);
+    } catch (error) {
+        status.textContent = '✗ Failed to set parameters: ' + error.message;
+        status.className = 'error';
+        resetProgress();
+        return;
+    }
+
+    // Step 2: Erasing flash (no data body is sent)
+    status.textContent = 'Erasing flash...';
+    status.className = 'info';
+
+    try {
+        const xhr = new XMLHttpRequest();
+
+        xhr.addEventListener('load', () => {
+            if (xhr.status === 200) {
+                status.textContent = '✓ ' + xhr.responseText;
+                status.className = 'success';
+                progressBar.style.width = '100%';
+                reenableBtn();
+            } else {
+                status.textContent = '✗ Error: ' + xhr.responseText;
+                status.className = 'error';
+                resetProgress();
+            }
+        });
+
+        xhr.addEventListener('error', () => {
+            status.textContent = '✗ Erase failed: Network error';
+            status.className = 'error';
+            resetProgress();
+        });
+
+        xhr.open('POST', '/erase');
+        xhr.send();
+    } catch (error) {
+        status.textContent = '✗ Erase failed: ' + error.message;
+        status.className = 'error';
+        resetProgress();
     }
 });
 

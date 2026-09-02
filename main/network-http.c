@@ -12,8 +12,9 @@
 
 #define TAG "network-http"
 
-esp_err_t flash_params_post_handler(httpd_req_t *req);
+esp_err_t connection_params_post_handler(httpd_req_t *req);
 esp_err_t upload_post_handler(httpd_req_t *req);
+esp_err_t erase_post_handler(httpd_req_t *req);
 
 esp_err_t nvs_settings_post_handler(httpd_req_t *req);
 esp_err_t nvs_settings_get_handler(httpd_req_t *req);
@@ -55,10 +56,15 @@ static const httpd_uri_t upload = {
     .method = HTTP_POST,
     .handler = upload_post_handler};
 
-static const httpd_uri_t flash_params_uri = {
-    .uri = "/flash-params",
+static const httpd_uri_t erase = {
+    .uri = "/erase",
     .method = HTTP_POST,
-    .handler = flash_params_post_handler};
+    .handler = erase_post_handler};
+
+static const httpd_uri_t connection_params_uri = {
+    .uri = "/connection-params",
+    .method = HTTP_POST,
+    .handler = connection_params_post_handler};
 
 static const httpd_uri_t nvs_settings_get_uri = {
     .uri = "/nvs-settings",
@@ -136,7 +142,8 @@ static httpd_handle_t start_webserver(void)
     ESP_LOGI(TAG, "Registering URI handlers");
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &upload);
-    httpd_register_uri_handler(server, &flash_params_uri);
+    httpd_register_uri_handler(server, &erase);
+    httpd_register_uri_handler(server, &connection_params_uri);
     httpd_register_uri_handler(server, &nvs_settings_get_uri);
     httpd_register_uri_handler(server, &nvs_settings_post_uri);
     httpd_register_uri_handler(server, &favicon_uri);

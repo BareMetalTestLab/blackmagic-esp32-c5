@@ -2,6 +2,8 @@
 #include <esp_http_server.h>
 #include <target.h>
 #include "gdb-glue.h"
+#include "general.h"
+#include "target_internal.h"
 
 #define TAG "network-http-target"
 
@@ -70,7 +72,7 @@ esp_err_t connection_params_post_handler(httpd_req_t *req)
         char resp[128];
         snprintf(resp, sizeof(resp),
                  "{\"success\":true,\"baseAddr\":\"0x%08lX\",\"iface\":\"%s\"}",
-                 connection_params.base_addr, connection_params.use_swd ? "swd" : "jtag");
+                 (unsigned long) connection_params.base_addr, connection_params.use_swd ? "swd" : "jtag");
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }

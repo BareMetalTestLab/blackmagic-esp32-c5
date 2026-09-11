@@ -485,3 +485,141 @@ cleanup_early:
         return ESP_FAIL;
     }
 }
+
+/* Flash read handler */
+esp_err_t read_post_handler(httpd_req_t *req)
+{
+    target_s *target = NULL;
+    bool success = false;
+    const char *error_msg = "Error: Flash operation failed";
+    uint32_t flash_base_addr = connection_params.base_addr; // Use stored parameters
+    size_t read_len = 1024 * 1024;                          // Read 1 MB from the base address
+    uint8_t *chunk_buffer = malloc(FLASH_CHUNK_SIZE);
+    bool stream_started = false;
+
+    if (!chunk_buffer)
+    {
+        ESP_LOGE(TAG, "Failed to allocate read buffer");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Error: Out of memory");
+        return ESP_FAIL;
+    }
+
+    // Step 1: Enable noack mode and reset the target via GDB packets
+    char cmd_reset[] = "$qRcmd,7265736574#37";
+    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+
+    extern target_s *target_list;
+    int try = 5;
+    while (target_list && try-- > 0)
+    {
+        ESP_LOGI(TAG, "Wait for target to halt...");
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+    }
+
+    // Step 2: Scan for target
+    bool target_found = false;
+    ESP_LOGI(TAG, "Scanning via %s...", connection_params.use_swd ? "SWD" : "JTAG");
+    if (connection_params.use_swd ? adiv5_swd_scan() : jtag_scan())
+    {
+        ESP_LOGI(TAG, "Target found via %s", connection_params.use_swd ? "SWD" : "JTAG");
+        target_found = true;
+    }
+
+    if (!target_found)
+    {
+        ESP_LOGE(TAG, "No target found!");
+        error_msg = "Error: No target device found";
+        goto cleanup_early;
+    }
+
+    // Step 3: Attach to target
+    target = target_attach_n(1, NULL);
+    if (!target)
+    {
+        ESP_LOGE(TAG, "Failed to attach to target");
+        gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+
+        error_msg = "Error: Failed to attach to target";
+        goto cleanup_early;
+    }
+
+    ESP_LOGI(TAG, "Successfully attached to target");
+
+    // Step 4: Halt the target
+    target_halt_request(target);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    target_halt_reason_e halt_reason = target_halt_poll(target, NULL);
+    if (halt_reason == TARGET_HALT_RUNNING || halt_reason == TARGET_HALT_ERROR)
+    {
+        ESP_LOGE(TAG, "Failed to halt target");
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Target halted");
+
+    // Step 5: Read flash and stream it to the client
+    ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", flash_base_addr, read_len);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"flash_dump.bin\"");
+    stream_started = true;
+
+    for (size_t offset = 0; offset < read_len;)
+    {
+        size_t chunk = MIN(read_len - offset, FLASH_CHUNK_SIZE);
+        if (target_mem32_read(target, chunk_buffer, flash_base_addr + offset, chunk))
+        {
+            ESP_LOGE(TAG, "Flash read failed at 0x%08lX", flash_base_addr + offset);
+            error_msg = "Error: Flash read failed";
+            httpd_resp_send_chunk(req, NULL, 0);
+            goto cleanup;
+        }
+
+        if (httpd_resp_send_chunk(req, (const char *)chunk_buffer, chunk) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to send chunk to client");
+            error_msg = "Error: Failed to send data";
+            httpd_resp_send_chunk(req, NULL, 0);
+            goto cleanup;
+        }
+
+        offset += chunk;
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
+
+    ESP_LOGI(TAG, "Flash read successfully");
+
+    // Step 6: Reset and resume the target
+    target_reset(target);
+    target_halt_resume(target, false);
+
+    success = true;
+
+cleanup:
+    if (target)
+    {
+        target_detach(target);
+    }
+    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    free(chunk_buffer);
+cleanup_early:
+    char pkt_disable_noack[] = "\x04";
+    gdb_glue_receive((uint8_t *)pkt_disable_noack, 1);
+
+    if (success)
+    {
+        return ESP_OK;
+    }
+    else if (!stream_started)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        return ESP_FAIL;
+    }
+    else
+    {
+        // Response body already started: the client detects the truncated dump by size
+        return ESP_OK;
+    }
+}

@@ -312,6 +312,110 @@ document.getElementById('eraseBtn').addEventListener('click', async () => {
     }
 });
 
+// Read flash button functionality
+const readFlashBtn = document.getElementById('readFlashBtn');
+readFlashBtn.addEventListener('click', async () => {
+    const status = document.getElementById('status');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+
+    readFlashBtn.disabled = true;
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+
+    // Step 1: Always send connection parameters before read
+    status.textContent = 'Setting flash parameters...';
+    status.className = 'info';
+
+    const baseAddr = document.getElementById('baseAddr').value;
+    const iface = document.querySelector('input[name="iface"]:checked').value;
+
+    const reenableBtn = () => {
+        readFlashBtn.disabled = false;
+    };
+
+    const resetProgress = () => {
+        progressBar.style.width = '0%';
+        progressContainer.style.display = 'none';
+        reenableBtn();
+    };
+
+    try {
+        const paramsResponse = await fetch('/connection-params', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
+        });
+
+        if (!paramsResponse.ok) {
+            const errorText = await paramsResponse.text();
+            status.textContent = '✗ Failed to set parameters: ' + errorText;
+            status.className = 'error';
+            resetProgress();
+            return;
+        }
+
+        const result = await paramsResponse.json();
+        if (!result.success) {
+            status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
+            status.className = 'error';
+            resetProgress();
+            return;
+        }
+
+        console.log('Flash parameters set:', result);
+    } catch (error) {
+        status.textContent = '✗ Failed to set parameters: ' + error.message;
+        status.className = 'error';
+        resetProgress();
+        return;
+    }
+
+    // Step 2: Read flash and download the dump (binary response)
+    const expectedSize = 1024 * 1024;
+    status.textContent = 'Reading flash (' + (expectedSize / 1024) + ' KB)...';
+    status.className = 'info';
+
+    try {
+        const res = await fetch('/read', { method: 'POST' });
+
+        if (!res.ok) {
+            const errorText = await res.text();
+            status.textContent = '✗ Read failed: ' + errorText;
+            status.className = 'error';
+            resetProgress();
+            return;
+        }
+
+        const blob = await res.blob();
+
+        // Mid-stream failures return a truncated 200, so validate the size
+        if (blob.size !== expectedSize) {
+            status.textContent = '✗ Read failed: got ' + blob.size + ' of ' + expectedSize + ' bytes';
+            status.className = 'error';
+            resetProgress();
+            return;
+        }
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'flash_dump.bin';
+        a.click();
+        URL.revokeObjectURL(a.href);
+
+        status.textContent = '✓ Flash dump saved (' + blob.size + ' bytes)';
+        status.className = 'success';
+        progressBar.style.width = '100%';
+        reenableBtn();
+    } catch (error) {
+        status.textContent = '✗ Read failed: ' + error.message;
+        status.className = 'error';
+        resetProgress();
+    }
+});
+
 // Tab switching functionality
 const tabButtons = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');

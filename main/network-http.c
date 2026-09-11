@@ -15,6 +15,7 @@
 esp_err_t connection_params_post_handler(httpd_req_t *req);
 esp_err_t upload_post_handler(httpd_req_t *req);
 esp_err_t erase_post_handler(httpd_req_t *req);
+esp_err_t read_post_handler(httpd_req_t *req);
 
 esp_err_t nvs_settings_post_handler(httpd_req_t *req);
 esp_err_t nvs_settings_get_handler(httpd_req_t *req);
@@ -60,6 +61,11 @@ static const httpd_uri_t erase = {
     .uri = "/erase",
     .method = HTTP_POST,
     .handler = erase_post_handler};
+
+static const httpd_uri_t read_post_uri = {
+    .uri = "/read",
+    .method = HTTP_POST,
+    .handler = read_post_handler};
 
 static const httpd_uri_t connection_params_uri = {
     .uri = "/connection-params",
@@ -155,6 +161,7 @@ static httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &networks_add_uri);
     httpd_register_uri_handler(server, &networks_update_uri);
     httpd_register_uri_handler(server, &networks_delete_uri);
+    httpd_register_uri_handler(server, &read_post_uri);
     return server;
 }
 

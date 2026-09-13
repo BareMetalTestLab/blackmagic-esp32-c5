@@ -1,5 +1,6 @@
 #include <esp_log.h>
 #include <esp_http_server.h>
+#include <string.h>
 #include <target.h>
 #include "gdb-glue.h"
 #include "general.h"
@@ -7,25 +8,113 @@
 
 #define TAG "network-http-target"
 
-#define FLASH_CHUNK_SIZE 4096      // Write in 4KB chunks for streaming
-#define FLASH_BASE_ADDR 0x08000000 // Default ARM Cortex-M flash base
+#define FLASH_CHUNK_SIZE 4096       // Write in 4KB chunks for streaming
+#define FLASH_BASE_ADDR 0x08000000  // Default ARM Cortex-M flash base
 
 // Flash parameters structure
 typedef struct
 {
     uint32_t base_addr;
-    bool use_swd; // true = SWD, false = JTAG
+    bool     use_swd;  // true = SWD, false = JTAG
 } connection_params_t;
 
 static connection_params_t connection_params = {
     .base_addr = FLASH_BASE_ADDR,
-    .use_swd = true, // Default to SWD
+    .use_swd   = true,  // Default to SWD
 };
 
-/* Flash parameters configuration handler */
-esp_err_t connection_params_post_handler(httpd_req_t *req)
+static void region_info(target_s* target)
 {
-    char content[256];
+    target_flash_s* flash = target->flash;
+
+    if (!flash)
+    {
+        ESP_LOGE(TAG, "Target has no flash region");
+        target_detach(target);
+        target = NULL;
+    }
+
+    /* Capture all useful target/flash fields now: they must not be
+     * dereferenced after target_detach() in the cleanup path below. */
+    const char* core_name          = target->core ? target->core : "unknown";
+    const char* driver_name        = target->driver ? target->driver : "unknown";
+    const char* cmdline            = target->cmdline;
+    uint32_t    cpuid              = target->cpuid;
+    uint16_t    designer_code      = target->designer_code;
+    uint16_t    part_id            = target->part_id;
+    bool        attached           = target->attached;
+    size_t      regs_size          = target->regs_size;
+    uint32_t    flash_start        = flash->start;
+    size_t      flash_length       = flash->length;
+    size_t      flash_blocksize    = flash->blocksize;
+    size_t      flash_writesize    = flash->writesize;
+    size_t      flash_writebufsize = flash->writebufsize;
+    uint8_t     flash_erased       = flash->erased;
+    uint8_t     flash_operation    = flash->operation;
+
+    /* The flash regions form a singly-linked list (newest region first).
+     * Copy the whole list into local storage while the target is still
+     * attached: the nodes are owned by the target and must not be
+     * dereferenced after target_detach() in the cleanup path below. */
+#define VERIFY_MAX_FLASH_REGIONS 8
+    size_t          region_count = 0;
+    uint32_t        region_start[VERIFY_MAX_FLASH_REGIONS];
+    size_t          region_length[VERIFY_MAX_FLASH_REGIONS];
+    size_t          region_blocksize[VERIFY_MAX_FLASH_REGIONS];
+    size_t          flash_total = 0;
+    target_flash_s* flash_it    = flash;
+    while (flash_it && region_count < VERIFY_MAX_FLASH_REGIONS)
+    {
+        region_start[region_count]     = flash_it->start;
+        region_length[region_count]    = flash_it->length;
+        region_blocksize[region_count] = flash_it->blocksize;
+        flash_total += flash_it->length;
+        region_count++;
+        flash_it = flash_it->next;
+    }
+    const bool regions_truncated = flash_it != NULL;
+
+    ESP_LOGI(TAG, "Target information: core=%s driver=%s attached=%d", core_name, driver_name, (int) attached);
+    ESP_LOGI(TAG,
+             "Target information: cpuid=%#08lx designer=%#04x part_id=%#04x",
+             (unsigned long) cpuid,
+             (unsigned) designer_code,
+             (unsigned) part_id);
+    ESP_LOGI(TAG, "Target information: regs_size=%zu cmdline=\"%s\"", regs_size, cmdline);
+    ESP_LOGI(TAG,
+             "Flash information: start=%#08lx length=%zu bytes (%zu KiB)",
+             (unsigned long) flash_start,
+             flash_length,
+             flash_length / 1024);
+    ESP_LOGI(TAG,
+             "Flash information: blocksize=%zu writesize=%zu writebufsize=%zu",
+             flash_blocksize,
+             flash_writesize,
+             flash_writebufsize);
+    ESP_LOGI(TAG, "Flash information: erased=%u operation=%u", (unsigned) flash_erased, (unsigned) flash_operation);
+    ESP_LOGI(TAG,
+             "Flash regions: %u region(s), total %zu bytes (%zu KiB)%s",
+             (unsigned) region_count,
+             flash_total,
+             flash_total / 1024,
+             regions_truncated ? " (truncated)" : "");
+    for (size_t i = 0; i < region_count; i++)
+    {
+        ESP_LOGI(TAG,
+                 "Flash region %zu/%u: start=%#08lx length=%zu bytes (%zu KiB) blocksize=%zu",
+                 i + 1,
+                 (unsigned) region_count,
+                 (unsigned long) region_start[i],
+                 region_length[i],
+                 region_length[i] / 1024,
+                 region_blocksize[i]);
+    }
+}
+
+/* Flash parameters configuration handler */
+esp_err_t connection_params_post_handler(httpd_req_t* req)
+{
+    char   content[256];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
 
     int ret = httpd_req_recv(req, content, recv_size);
@@ -41,8 +130,8 @@ esp_err_t connection_params_post_handler(httpd_req_t *req)
 
     // Parse URL-encoded form data
     char base_addr_str[32] = {0};
-    char iface_str[8] = {0};
-    bool params_ok = false;
+    char iface_str[8]      = {0};
+    bool params_ok         = false;
 
     if (httpd_query_key_value(content, "baseAddr", base_addr_str, sizeof(base_addr_str)) == ESP_OK)
     {
@@ -50,7 +139,7 @@ esp_err_t connection_params_post_handler(httpd_req_t *req)
         if (new_addr != 0)
         {
             connection_params.base_addr = new_addr;
-            params_ok = true;
+            params_ok                   = true;
         }
     }
 
@@ -65,26 +154,29 @@ esp_err_t connection_params_post_handler(httpd_req_t *req)
 
     if (params_ok)
     {
-        ESP_LOGI(TAG, "Flash parameters updated: base_addr=0x%08lX, iface=%s",
-                 connection_params.base_addr, connection_params.use_swd ? "SWD" : "JTAG");
+        ESP_LOGI(TAG,
+                 "Flash parameters updated: base_addr=0x%08lX, iface=%s",
+                 connection_params.base_addr,
+                 connection_params.use_swd ? "SWD" : "JTAG");
 
         httpd_resp_set_type(req, "application/json");
         char resp[128];
-        snprintf(resp, sizeof(resp),
+        snprintf(resp,
+                 sizeof(resp),
                  "{\"success\":true,\"baseAddr\":\"0x%08lX\",\"iface\":\"%s\"}",
-                 (unsigned long) connection_params.base_addr, connection_params.use_swd ? "swd" : "jtag");
+                 (unsigned long) connection_params.base_addr,
+                 connection_params.use_swd ? "swd" : "jtag");
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
 
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid parameters\"}",
-                    HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid parameters\"}", HTTPD_RESP_USE_STRLEN);
     return ESP_FAIL;
 }
 
 /* Helper to find pattern in buffer */
-static int find_pattern(const uint8_t *buffer, size_t buf_len, const char *pattern, size_t pattern_len)
+static int find_pattern(const uint8_t* buffer, size_t buf_len, const char* pattern, size_t pattern_len)
 {
     for (size_t i = 0; i <= buf_len - pattern_len; i++)
     {
@@ -97,30 +189,30 @@ static int find_pattern(const uint8_t *buffer, size_t buf_len, const char *patte
 }
 
 /* File upload handler with streaming flash */
-esp_err_t upload_post_handler(httpd_req_t *req)
+esp_err_t upload_post_handler(httpd_req_t* req)
 {
-    uint8_t *chunk_buffer = NULL;
-    uint8_t *header_buffer = NULL;
-    target_s *target = NULL;
-    size_t content_length = req->content_len;
-    size_t total_received = 0;
-    size_t total_written = 0;
-    size_t data_start_offset = 0;
-    int last_progress_reported = -1;
-    bool success = false;
-    bool headers_parsed = false;
-    const char *error_msg = "Error: Flash operation failed";
-    uint32_t flash_base_addr = connection_params.base_addr; // Use stored parameters
+    uint8_t*    chunk_buffer           = NULL;
+    uint8_t*    header_buffer          = NULL;
+    target_s*   target                 = NULL;
+    size_t      content_length         = req->content_len;
+    size_t      total_received         = 0;
+    size_t      total_written          = 0;
+    size_t      data_start_offset      = 0;
+    int         last_progress_reported = -1;
+    bool        success                = false;
+    bool        headers_parsed         = false;
+    const char* error_msg              = "Error: Flash operation failed";
+    uint32_t    flash_base_addr        = connection_params.base_addr;  // Use stored parameters
 
     ESP_LOGI(TAG, "Starting streaming firmware flash, content size: %zu bytes", content_length);
 
     // Allocate buffers
-    chunk_buffer = (uint8_t *)malloc(FLASH_CHUNK_SIZE);
-    header_buffer = (uint8_t *)malloc(2048); // For parsing multipart headers
+    chunk_buffer  = (uint8_t*) malloc(FLASH_CHUNK_SIZE);
+    header_buffer = (uint8_t*) malloc(2048);  // For parsing multipart headers
     if (!chunk_buffer || !header_buffer)
     {
         ESP_LOGE(TAG, "Failed to allocate buffers");
-        const char *resp = "Error: Out of memory";
+        const char* resp = "Error: Out of memory";
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, resp);
         if (chunk_buffer)
             free(chunk_buffer);
@@ -131,13 +223,12 @@ esp_err_t upload_post_handler(httpd_req_t *req)
 
     // Step 1: Parse multipart headers to find where binary data starts
     ESP_LOGI(TAG, "Parsing multipart headers...");
-    size_t header_read = 0;
-    const char *header_end_pattern = "\r\n\r\n";
+    size_t      header_read        = 0;
+    const char* header_end_pattern = "\r\n\r\n";
 
     while (!headers_parsed && header_read < 2048 && header_read < content_length)
     {
-        int recv_len = httpd_req_recv(req, (char *)(header_buffer + header_read),
-                                      MIN(512, 2048 - header_read));
+        int recv_len = httpd_req_recv(req, (char*) (header_buffer + header_read), MIN(512, 2048 - header_read));
         if (recv_len <= 0)
         {
             if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
@@ -154,10 +245,9 @@ esp_err_t upload_post_handler(httpd_req_t *req)
         int end_pos = find_pattern(header_buffer, header_read, header_end_pattern, 4);
         if (end_pos >= 0)
         {
-            data_start_offset = end_pos + 4; // Skip past \r\n\r\n
-            headers_parsed = true;
-            ESP_LOGI(TAG, "Headers end at offset %zu, binary data starts at %zu",
-                     end_pos, data_start_offset);
+            data_start_offset = end_pos + 4;  // Skip past \r\n\r\n
+            headers_parsed    = true;
+            ESP_LOGI(TAG, "Headers end at offset %zu, binary data starts at %zu", end_pos, data_start_offset);
         }
     }
 
@@ -173,20 +263,23 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     // Calculate actual firmware size (exclude headers and trailing boundary)
     // Trailing boundary is typically ~50-100 bytes: \r\n------WebKitFormBoundary...\r\n
     size_t estimated_boundary_size = 100;
-    size_t firmware_size = content_length - data_start_offset - estimated_boundary_size;
-    ESP_LOGI(TAG, "Estimated firmware size: %zu bytes (content: %zu, headers: %zu)",
-             firmware_size, content_length, data_start_offset);
+    size_t firmware_size           = content_length - data_start_offset - estimated_boundary_size;
+    ESP_LOGI(TAG,
+             "Estimated firmware size: %zu bytes (content: %zu, headers: %zu)",
+             firmware_size,
+             content_length,
+             data_start_offset);
 
     // Step 2: Scan for targets
     ESP_LOGI(TAG, "Scanning for targets...");
 
     char pkt_enable_noack[] = "$QStartNoAckMode#B0";
-    gdb_glue_receive((uint8_t *)pkt_enable_noack, sizeof(pkt_enable_noack)); /* Enable NoAckMode */
+    gdb_glue_receive((uint8_t*) pkt_enable_noack, sizeof(pkt_enable_noack)); /* Enable NoAckMode */
 
     char cmd_reset[] = "$qRcmd,7265736574#37";
-    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
-    extern target_s *target_list;
-    int try = 5;
+    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
+    extern target_s* target_list;
+    int              try = 5;
     while (target_list && try-- > 0)
     {
         ESP_LOGI(TAG, "Wait for target to halt...");
@@ -213,7 +306,7 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     if (!target)
     {
         ESP_LOGE(TAG, "Failed to attach to target");
-        gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+        gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
         vTaskDelay(3000 / portTICK_PERIOD_MS);
 
         error_msg = "Error: Failed to attach to target";
@@ -247,7 +340,7 @@ esp_err_t upload_post_handler(httpd_req_t *req)
 
     // Step 6: Stream data and write to flash
     // First, handle any binary data already in header_buffer
-    size_t chunk_offset = 0;
+    size_t chunk_offset     = 0;
     size_t binary_in_header = header_read - data_start_offset;
     if (binary_in_header > 0)
     {
@@ -257,14 +350,14 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     free(header_buffer);
     header_buffer = NULL;
 
-    size_t remaining = content_length - total_received;
-    size_t target_bytes_to_write = firmware_size; // How many bytes to actually write to target
+    size_t remaining             = content_length - total_received;
+    size_t target_bytes_to_write = firmware_size;  // How many bytes to actually write to target
 
     while (remaining > 0 && total_written < target_bytes_to_write)
     {
         // Read data chunk
-        size_t to_read = MIN(FLASH_CHUNK_SIZE - chunk_offset, remaining);
-        int recv_len = httpd_req_recv(req, (char *)(chunk_buffer + chunk_offset), to_read);
+        size_t to_read  = MIN(FLASH_CHUNK_SIZE - chunk_offset, remaining);
+        int    recv_len = httpd_req_recv(req, (char*) (chunk_buffer + chunk_offset), to_read);
 
         if (recv_len <= 0)
         {
@@ -287,12 +380,9 @@ esp_err_t upload_post_handler(httpd_req_t *req)
             bytes_to_flash = target_bytes_to_write - total_written;
         }
 
-        if (bytes_to_flash >= FLASH_CHUNK_SIZE ||
-            (total_written + bytes_to_flash >= target_bytes_to_write))
+        if (bytes_to_flash >= FLASH_CHUNK_SIZE || (total_written + bytes_to_flash >= target_bytes_to_write))
         {
-
-            if (!target_flash_write(target, flash_base_addr + total_written,
-                                    chunk_buffer, bytes_to_flash))
+            if (!target_flash_write(target, flash_base_addr + total_written, chunk_buffer, bytes_to_flash))
             {
                 ESP_LOGE(TAG, "Flash write failed at offset %zu", total_written);
                 goto cleanup;
@@ -303,8 +393,7 @@ esp_err_t upload_post_handler(httpd_req_t *req)
             // Move remaining data to start of buffer
             if (chunk_offset > bytes_to_flash)
             {
-                memmove(chunk_buffer, chunk_buffer + bytes_to_flash,
-                        chunk_offset - bytes_to_flash);
+                memmove(chunk_buffer, chunk_buffer + bytes_to_flash, chunk_offset - bytes_to_flash);
                 chunk_offset -= bytes_to_flash;
             }
             else
@@ -313,11 +402,10 @@ esp_err_t upload_post_handler(httpd_req_t *req)
             }
 
             // Log progress every 10%
-            int progress = (int)(total_written * 100 / target_bytes_to_write);
+            int progress = (int) (total_written * 100 / target_bytes_to_write);
             if (progress / 10 > last_progress_reported / 10)
             {
-                ESP_LOGI(TAG, "Flash progress: %zu / %zu bytes (%d%%)",
-                         total_written, target_bytes_to_write, progress);
+                ESP_LOGI(TAG, "Flash progress: %zu / %zu bytes (%d%%)", total_written, target_bytes_to_write, progress);
                 last_progress_reported = progress;
             }
         }
@@ -327,7 +415,7 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     while (remaining > 0)
     {
         char discard[256];
-        int recv_len = httpd_req_recv(req, discard, MIN(sizeof(discard), remaining));
+        int  recv_len = httpd_req_recv(req, discard, MIN(sizeof(discard), remaining));
         if (recv_len <= 0)
         {
             if (recv_len == HTTPD_SOCK_ERR_TIMEOUT)
@@ -358,11 +446,11 @@ cleanup:
     {
         target_detach(target);
     }
-    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 cleanup_early:
     char pkt_disable_noack[] = "\x04";
-    gdb_glue_receive((uint8_t *)pkt_disable_noack, 1);
+    gdb_glue_receive((uint8_t*) pkt_disable_noack, 1);
     if (header_buffer)
         free(header_buffer);
     if (chunk_buffer)
@@ -370,7 +458,7 @@ cleanup_early:
 
     if (success)
     {
-        const char *resp = "Firmware flashed successfully";
+        const char* resp = "Firmware flashed successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
@@ -382,20 +470,20 @@ cleanup_early:
 }
 
 /* Flash erase handler */
-esp_err_t erase_post_handler(httpd_req_t *req)
+esp_err_t erase_post_handler(httpd_req_t* req)
 {
-    target_s *target = NULL;
-    bool success = false;
-    const char *error_msg = "Error: Flash operation failed";
-    uint32_t flash_base_addr = connection_params.base_addr; // Use stored parameters
-    size_t erase_len = 1024 * 1024; // Erase 1 MB from the base address
+    target_s*   target          = NULL;
+    bool        success         = false;
+    const char* error_msg       = "Error: Flash operation failed";
+    uint32_t    flash_base_addr = connection_params.base_addr;  // Use stored parameters
+    size_t      erase_len       = 0;                            // Erase 1 MB from the base address
 
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
-    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
 
-    extern target_s *target_list;
-    int try = 5;
+    extern target_s* target_list;
+    int              try = 5;
     while (target_list && try-- > 0)
     {
         ESP_LOGI(TAG, "Wait for target to halt...");
@@ -423,7 +511,7 @@ esp_err_t erase_post_handler(httpd_req_t *req)
     if (!target)
     {
         ESP_LOGE(TAG, "Failed to attach to target");
-        gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+        gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
         vTaskDelay(3000 / portTICK_PERIOD_MS);
 
         error_msg = "Error: Failed to attach to target";
@@ -445,6 +533,19 @@ esp_err_t erase_post_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Target halted");
 
+    region_info(target);
+    target_flash_s* flash_it = target->flash;
+    while (flash_it)
+    {
+        if (flash_it->start & 0x08000000)
+        {
+            erase_len += flash_it->length;
+        }
+        flash_it = flash_it->next;
+    }
+    
+    char read_len_str[12];
+    itoa(erase_len, read_len_str, 10);
     // Step 5: Erase flash
     ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", flash_base_addr, erase_len);
     if (!target_flash_erase(target, flash_base_addr, erase_len))
@@ -467,15 +568,15 @@ cleanup:
     {
         target_detach(target);
     }
-    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 cleanup_early:
     char pkt_disable_noack[] = "\x04";
-    gdb_glue_receive((uint8_t *)pkt_disable_noack, 1);
+    gdb_glue_receive((uint8_t*) pkt_disable_noack, 1);
 
     if (success)
     {
-        const char *resp = "Flash erased successfully";
+        const char* resp = "Flash erased successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
@@ -487,15 +588,15 @@ cleanup_early:
 }
 
 /* Flash read handler */
-esp_err_t read_post_handler(httpd_req_t *req)
+esp_err_t read_post_handler(httpd_req_t* req)
 {
-    target_s *target = NULL;
-    bool success = false;
-    const char *error_msg = "Error: Flash operation failed";
-    uint32_t flash_base_addr = connection_params.base_addr; // Use stored parameters
-    size_t read_len = 1024 * 1024;                          // Read 1 MB from the base address
-    uint8_t *chunk_buffer = malloc(FLASH_CHUNK_SIZE);
-    bool stream_started = false;
+    target_s*   target          = NULL;
+    bool        success         = false;
+    const char* error_msg       = "Error: Flash operation failed";
+    uint32_t    flash_base_addr = connection_params.base_addr;  // Use stored parameters
+    size_t      read_len        = 0;
+    uint8_t*    chunk_buffer    = malloc(FLASH_CHUNK_SIZE);
+    bool        stream_started  = false;
 
     if (!chunk_buffer)
     {
@@ -506,10 +607,10 @@ esp_err_t read_post_handler(httpd_req_t *req)
 
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
-    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
 
-    extern target_s *target_list;
-    int try = 5;
+    extern target_s* target_list;
+    int              try = 5;
     while (target_list && try-- > 0)
     {
         ESP_LOGI(TAG, "Wait for target to halt...");
@@ -537,7 +638,7 @@ esp_err_t read_post_handler(httpd_req_t *req)
     if (!target)
     {
         ESP_LOGE(TAG, "Failed to attach to target");
-        gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+        gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
         vTaskDelay(3000 / portTICK_PERIOD_MS);
 
         error_msg = "Error: Failed to attach to target";
@@ -559,10 +660,24 @@ esp_err_t read_post_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Target halted");
 
+    region_info(target);
+    target_flash_s* flash_it = target->flash;
+    while (flash_it)
+    {
+        if (flash_it->start & 0x08000000)
+        {
+            read_len += flash_it->length;
+        }
+        flash_it = flash_it->next;
+    }
+
     // Step 5: Read flash and stream it to the client
     ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", flash_base_addr, read_len);
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"flash_dump.bin\"");
+    char read_len_str[12];
+    itoa(read_len, read_len_str, 10);
+    httpd_resp_set_hdr(req, "Content-Length", read_len_str);
     stream_started = true;
 
     for (size_t offset = 0; offset < read_len;)
@@ -576,7 +691,7 @@ esp_err_t read_post_handler(httpd_req_t *req)
             goto cleanup;
         }
 
-        if (httpd_resp_send_chunk(req, (const char *)chunk_buffer, chunk) != ESP_OK)
+        if (httpd_resp_send_chunk(req, (const char*) chunk_buffer, chunk) != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to send chunk to client");
             error_msg = "Error: Failed to send data";
@@ -601,12 +716,12 @@ cleanup:
     {
         target_detach(target);
     }
-    gdb_glue_receive((uint8_t *)cmd_reset, sizeof(cmd_reset));
+    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     free(chunk_buffer);
 cleanup_early:
     char pkt_disable_noack[] = "\x04";
-    gdb_glue_receive((uint8_t *)pkt_disable_noack, 1);
+    gdb_glue_receive((uint8_t*) pkt_disable_noack, 1);
 
     if (success)
     {

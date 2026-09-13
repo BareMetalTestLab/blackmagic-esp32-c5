@@ -12,12 +12,12 @@ rebootBtn.addEventListener('click', async () => {
     if (confirm('Are you sure you want to reboot the device?')) {
         rebootBtn.disabled = true;
         rebootBtn.textContent = '⏳';
-        
+
         try {
             const response = await fetch('/reboot', {
                 method: 'POST'
             });
-            
+
             if (response.ok) {
                 alert('Device is rebooting...');
                 // Optionally reload page after some delay
@@ -80,7 +80,7 @@ function preventDefaults(e) {
 dropZone.addEventListener('drop', (e) => {
     const dt = e.dataTransfer;
     const files = dt.files;
-    
+
     if (files.length > 0) {
         fileInput.files = files;
         handleFile(files[0]);
@@ -90,7 +90,7 @@ dropZone.addEventListener('drop', (e) => {
 function handleFile(file) {
     const validTypes = ['.bin'];
     const fileExt = '.' + file.name.split('.').pop().toLowerCase();
-    
+
     if (!validTypes.includes(fileExt)) {
         fileInfo.textContent = '❌ Invalid file type. Please select a .bin or .elf file.';
         fileInfo.style.display = 'block';
@@ -99,13 +99,13 @@ function handleFile(file) {
         uploadBtn.disabled = true;
         return;
     }
-    
-    fileInfo.textContent = `✓ Selected: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+
+    fileInfo.textContent = `✓ Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
     fileInfo.style.display = 'block';
     fileInfo.style.backgroundColor = '#e6f7e6';
     fileInfo.style.color = '#2d5016';
     uploadBtn.disabled = false;
-    
+
     // Auto-upload if advanced settings are closed
     const advancedSettings = document.getElementById('advancedSettings');
     if (!advancedSettings.open) {
@@ -117,26 +117,26 @@ function handleFile(file) {
 
 document.getElementById('uploadFormElement').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const file = fileInput.files[0];
-    
+
     if (!file) return;
-    
+
     const status = document.getElementById('status');
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
-    
+
     uploadBtn.disabled = true;
     progressContainer.style.display = 'block';
     progressBar.style.width = '0%';
-    
+
     // Step 1: Always send flash parameters before upload
     status.textContent = 'Setting flash parameters...';
     status.className = 'info';
-    
+
     const baseAddr = document.getElementById('baseAddr').value;
     const iface = document.querySelector('input[name="iface"]:checked').value;
-    
+
     try {
         const paramsResponse = await fetch('/connection-params', {
             method: 'POST',
@@ -145,7 +145,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             },
             body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
         });
-        
+
         if (!paramsResponse.ok) {
             const errorText = await paramsResponse.text();
             status.textContent = '✗ Failed to set parameters: ' + errorText;
@@ -153,7 +153,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             uploadBtn.disabled = false;
             return;
         }
-        
+
         const result = await paramsResponse.json();
         if (!result.success) {
             status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
@@ -161,7 +161,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             uploadBtn.disabled = false;
             return;
         }
-        
+
         console.log('Flash parameters set:', result);
         progressBar.style.width = '5%';
     } catch (error) {
@@ -170,17 +170,17 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
         uploadBtn.disabled = false;
         return;
     }
-    
+
     // Step 2: Upload firmware file
-    status.textContent = 'Uploading ' + file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)...';
+    status.textContent = 'Uploading ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)...';
     status.className = 'info';
-    
+
     const formData = new FormData();
     formData.append('file', file);
-    
+
     try {
         const xhr = new XMLHttpRequest();
-        
+
         xhr.upload.addEventListener('progress', (e) => {
             if (e.lengthComputable) {
                 const percent = (e.loaded / e.total) * 100;
@@ -188,7 +188,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
                 status.textContent = 'Uploading... ' + percent.toFixed(0) + '%';
             }
         });
-        
+
         xhr.addEventListener('load', () => {
             if (xhr.status === 200) {
                 status.textContent = '✓ ' + xhr.responseText;
@@ -200,13 +200,13 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             }
             uploadBtn.disabled = false;
         });
-        
+
         xhr.addEventListener('error', () => {
             status.textContent = '✗ Upload failed: Network error';
             status.className = 'error';
             uploadBtn.disabled = false;
         });
-        
+
         xhr.open('POST', '/upload');
         xhr.send(formData);
     } catch (error) {
@@ -374,10 +374,6 @@ readFlashBtn.addEventListener('click', async () => {
     }
 
     // Step 2: Read flash and download the dump (binary response)
-    const expectedSize = 1024 * 1024;
-    status.textContent = 'Reading flash (' + (expectedSize / 1024) + ' KB)...';
-    status.className = 'info';
-
     try {
         const res = await fetch('/read', { method: 'POST' });
 
@@ -389,11 +385,36 @@ readFlashBtn.addEventListener('click', async () => {
             return;
         }
 
-        const blob = await res.blob();
+        const contentLength = res.headers.get('Content-Length');
+        const total = parseInt(contentLength, 10);
+
+        status.textContent = 'Reading flash (' + (total / 1024) + ' KB)...';
+        status.className = 'info';
+
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            chunks.push(value);
+            received += value.length;
+
+            const percent = Math.min((received / total) * 100, 100);
+            progressBar.style.width = percent.toFixed(1) + '%';
+            status.textContent = 'Reading flash: ' +
+                (received / 1024).toFixed(0) + ' / ' +
+                (total / 1024).toFixed(0) + ' KB (' +
+                percent.toFixed(1) + '%)';
+        }
+
+        const blob = new Blob(chunks);
 
         // Mid-stream failures return a truncated 200, so validate the size
-        if (blob.size !== expectedSize) {
-            status.textContent = '✗ Read failed: got ' + blob.size + ' of ' + expectedSize + ' bytes';
+        if (blob.size !== total) {
+            status.textContent = '✗ Read failed: got ' + blob.size + ' of ' + total + ' bytes';
             status.className = 'error';
             resetProgress();
             return;
@@ -423,11 +444,11 @@ const tabContents = document.querySelectorAll('.tab-content');
 tabButtons.forEach(button => {
     button.addEventListener('click', () => {
         const targetTab = button.getAttribute('data-tab');
-        
+
         // Remove active class from all buttons and contents
         tabButtons.forEach(btn => btn.classList.remove('active'));
         tabContents.forEach(content => content.classList.remove('active'));
-        
+
         // Add active class to clicked button and corresponding content
         button.classList.add('active');
         document.getElementById(targetTab + '-tab').classList.add('active');
@@ -443,21 +464,21 @@ const settingsStatus = document.getElementById('settingsStatus');
 async function loadSettings() {
     settingsStatus.textContent = '';
     settingsStatus.className = '';
-    
+
     try {
         const response = await fetch('/nvs-settings');
-        
+
         if (!response.ok) {
             throw new Error('Failed to load settings');
         }
-        
+
         const data = await response.json();
-        
+
         document.getElementById('hostname').value = data.hostname || ''
-        
+
         settingsStatus.textContent = '';
         settingsStatus.className = '';
-        
+
     } catch (error) {
         settingsStatus.textContent = '✗ Error loading settings: ' + error.message;
         settingsStatus.className = 'error';
@@ -467,17 +488,17 @@ async function loadSettings() {
 // Save settings
 settingsForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const hostname = document.getElementById('hostname').value;
-    
+
     settingsStatus.textContent = 'Saving settings...';
     settingsStatus.className = 'info';
     saveSettingsBtn.disabled = true;
-    
+
     try {
         const params = new URLSearchParams();
         if (hostname) params.append('hostname', hostname);
-        
+
         const response = await fetch('/nvs-settings', {
             method: 'POST',
             headers: {
@@ -485,17 +506,17 @@ settingsForm.addEventListener('submit', async (e) => {
             },
             body: params.toString()
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to save settings');
         }
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             settingsStatus.textContent = '✓ Settings saved successfully! Restart device to apply changes.';
             settingsStatus.className = 'success';
-            
+
             // Reload settings to verify
             setTimeout(() => {
                 loadSettings();
@@ -504,7 +525,7 @@ settingsForm.addEventListener('submit', async (e) => {
             settingsStatus.textContent = '✗ ' + (result.error || 'Failed to save settings');
             settingsStatus.className = 'error';
         }
-        
+
     } catch (error) {
         settingsStatus.textContent = '✗ Error saving settings: ' + error.message;
         settingsStatus.className = 'error';
@@ -538,9 +559,9 @@ async function loadPins() {
 
         document.getElementById('pinSwdio').value = data.swdio;
         document.getElementById('pinSwclk').value = data.swclk;
-        document.getElementById('pinTdi').value   = data.tdi;
-        document.getElementById('pinTdo').value   = data.tdo;
-        document.getElementById('pinTrst').value  = data.trst;
+        document.getElementById('pinTdi').value = data.tdi;
+        document.getElementById('pinTdo').value = data.tdo;
+        document.getElementById('pinTrst').value = data.trst;
     } catch (error) {
         console.error('Error loading pins:', error);
     }
@@ -558,9 +579,9 @@ pinsForm.addEventListener('submit', async (e) => {
         const params = new URLSearchParams({
             swdio: document.getElementById('pinSwdio').value,
             swclk: document.getElementById('pinSwclk').value,
-            tdi:   document.getElementById('pinTdi').value,
-            tdo:   document.getElementById('pinTdo').value,
-            trst:  document.getElementById('pinTrst').value,
+            tdi: document.getElementById('pinTdi').value,
+            tdo: document.getElementById('pinTdo').value,
+            trst: document.getElementById('pinTrst').value,
         });
 
         const response = await fetch('/pins', {

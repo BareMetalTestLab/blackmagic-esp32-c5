@@ -137,40 +137,6 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
     const baseAddr = document.getElementById('baseAddr').value;
     const iface = document.querySelector('input[name="iface"]:checked').value;
 
-    try {
-        const paramsResponse = await fetch('/connection-params', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
-        });
-
-        if (!paramsResponse.ok) {
-            const errorText = await paramsResponse.text();
-            status.textContent = '✗ Failed to set parameters: ' + errorText;
-            status.className = 'error';
-            uploadBtn.disabled = false;
-            return;
-        }
-
-        const result = await paramsResponse.json();
-        if (!result.success) {
-            status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
-            status.className = 'error';
-            uploadBtn.disabled = false;
-            return;
-        }
-
-        console.log('Flash parameters set:', result);
-        progressBar.style.width = '5%';
-    } catch (error) {
-        status.textContent = '✗ Failed to set parameters: ' + error.message;
-        status.className = 'error';
-        uploadBtn.disabled = false;
-        return;
-    }
-
     // Step 2: Upload firmware file
     status.textContent = 'Uploading ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)...';
     status.className = 'info';
@@ -207,7 +173,8 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             uploadBtn.disabled = false;
         });
 
-        xhr.open('POST', '/upload');
+        xhr.open('POST', '/upload?baseAddr=' + encodeURIComponent(baseAddr) +
+            '&iface=' + encodeURIComponent(iface));
         xhr.send(formData);
     } catch (error) {
         status.textContent = '✗ Upload failed: ' + error.message;
@@ -244,39 +211,6 @@ document.getElementById('eraseBtn').addEventListener('click', async () => {
         reenableBtn();
     };
 
-    try {
-        const paramsResponse = await fetch('/connection-params', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
-        });
-
-        if (!paramsResponse.ok) {
-            const errorText = await paramsResponse.text();
-            status.textContent = '✗ Failed to set parameters: ' + errorText;
-            status.className = 'error';
-            resetProgress();
-            return;
-        }
-
-        const result = await paramsResponse.json();
-        if (!result.success) {
-            status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
-            status.className = 'error';
-            resetProgress();
-            return;
-        }
-
-        console.log('Flash parameters set:', result);
-    } catch (error) {
-        status.textContent = '✗ Failed to set parameters: ' + error.message;
-        status.className = 'error';
-        resetProgress();
-        return;
-    }
-
     // Step 2: Erasing flash (no data body is sent)
     status.textContent = 'Erasing flash...';
     status.className = 'info';
@@ -303,7 +237,8 @@ document.getElementById('eraseBtn').addEventListener('click', async () => {
             resetProgress();
         });
 
-        xhr.open('POST', '/erase');
+        xhr.open('POST', '/erase?baseAddr=' + encodeURIComponent(baseAddr) +
+            '&iface=' + encodeURIComponent(iface));
         xhr.send();
     } catch (error) {
         status.textContent = '✗ Erase failed: ' + error.message;
@@ -340,42 +275,10 @@ readFlashBtn.addEventListener('click', async () => {
         reenableBtn();
     };
 
-    try {
-        const paramsResponse = await fetch('/connection-params', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'baseAddr=' + encodeURIComponent(baseAddr) + '&iface=' + encodeURIComponent(iface)
-        });
-
-        if (!paramsResponse.ok) {
-            const errorText = await paramsResponse.text();
-            status.textContent = '✗ Failed to set parameters: ' + errorText;
-            status.className = 'error';
-            resetProgress();
-            return;
-        }
-
-        const result = await paramsResponse.json();
-        if (!result.success) {
-            status.textContent = '✗ Failed to set parameters: ' + (result.error || 'Unknown error');
-            status.className = 'error';
-            resetProgress();
-            return;
-        }
-
-        console.log('Flash parameters set:', result);
-    } catch (error) {
-        status.textContent = '✗ Failed to set parameters: ' + error.message;
-        status.className = 'error';
-        resetProgress();
-        return;
-    }
-
     // Step 2: Read flash and download the dump (binary response)
     try {
-        const res = await fetch('/read', { method: 'POST' });
+        const res = await fetch('/read?baseAddr=' + encodeURIComponent(baseAddr) +
+            '&iface=' + encodeURIComponent(iface), { method: 'POST' });
 
         if (!res.ok) {
             const errorText = await res.text();

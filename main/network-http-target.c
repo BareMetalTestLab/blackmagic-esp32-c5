@@ -1,5 +1,6 @@
 #include <esp_log.h>
 #include <esp_http_server.h>
+#include <stdint.h>
 #include <string.h>
 #include <target.h>
 #include "gdb-glue.h"
@@ -10,18 +11,6 @@
 
 #define FLASH_CHUNK_SIZE 4096       // Write in 4KB chunks for streaming
 #define FLASH_BASE_ADDR 0x08000000  // Default ARM Cortex-M flash base
-
-// Flash parameters structure
-typedef struct
-{
-    uint32_t base_addr;
-    bool     use_swd;  // true = SWD, false = JTAG
-} connection_params_t;
-
-static connection_params_t connection_params = {
-    .base_addr = FLASH_BASE_ADDR,
-    .use_swd   = true,  // Default to SWD
-};
 
 static void region_info(target_s* target)
 {
@@ -111,70 +100,6 @@ static void region_info(target_s* target)
     }
 }
 
-/* Flash parameters configuration handler */
-esp_err_t connection_params_post_handler(httpd_req_t* req)
-{
-    char   content[256];
-    size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
-
-    int ret = httpd_req_recv(req, content, recv_size);
-    if (ret <= 0)
-    {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
-        {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    content[ret] = '\0';
-
-    // Parse URL-encoded form data
-    char base_addr_str[32] = {0};
-    char iface_str[8]      = {0};
-    bool params_ok         = false;
-
-    if (httpd_query_key_value(content, "baseAddr", base_addr_str, sizeof(base_addr_str)) == ESP_OK)
-    {
-        uint32_t new_addr = strtoul(base_addr_str, NULL, 0);
-        if (new_addr != 0)
-        {
-            connection_params.base_addr = new_addr;
-            params_ok                   = true;
-        }
-    }
-
-    if (httpd_query_key_value(content, "iface", iface_str, sizeof(iface_str)) == ESP_OK)
-    {
-        if (strncmp(iface_str, "swd", 3) == 0)
-            connection_params.use_swd = true;
-        else if (strncmp(iface_str, "jtag", 4) == 0)
-            connection_params.use_swd = false;
-        params_ok = true;
-    }
-
-    if (params_ok)
-    {
-        ESP_LOGI(TAG,
-                 "Flash parameters updated: base_addr=0x%08lX, iface=%s",
-                 connection_params.base_addr,
-                 connection_params.use_swd ? "SWD" : "JTAG");
-
-        httpd_resp_set_type(req, "application/json");
-        char resp[128];
-        snprintf(resp,
-                 sizeof(resp),
-                 "{\"success\":true,\"baseAddr\":\"0x%08lX\",\"iface\":\"%s\"}",
-                 (unsigned long) connection_params.base_addr,
-                 connection_params.use_swd ? "swd" : "jtag");
-        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
-    }
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid parameters\"}", HTTPD_RESP_USE_STRLEN);
-    return ESP_FAIL;
-}
-
 /* Helper to find pattern in buffer */
 static int find_pattern(const uint8_t* buffer, size_t buf_len, const char* pattern, size_t pattern_len)
 {
@@ -186,6 +111,29 @@ static int find_pattern(const uint8_t* buffer, size_t buf_len, const char* patte
         }
     }
     return -1;
+}
+
+typedef struct
+{
+    uint32_t base_addr;
+    uint32_t length;
+    bool     use_swd;
+} flash_params_t;
+
+static flash_params_t flash_params(httpd_req_t* req)
+{
+    flash_params_t params = {.base_addr = 0x08000000, .length = 0, .use_swd = true};
+
+    char query[128];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
+    {
+        char val[32];
+        if (httpd_query_key_value(query, "baseAddr", val, sizeof(val)) == ESP_OK)
+            params.base_addr = strtoul(val, NULL, 0);
+        if (httpd_query_key_value(query, "iface", val, sizeof(val)) == ESP_OK)
+            params.use_swd = (strncmp(val, "swd", 3) == 0);
+    }
+    return params;
 }
 
 /* File upload handler with streaming flash */
@@ -202,7 +150,8 @@ esp_err_t upload_post_handler(httpd_req_t* req)
     bool        success                = false;
     bool        headers_parsed         = false;
     const char* error_msg              = "Error: Flash operation failed";
-    uint32_t    flash_base_addr        = connection_params.base_addr;  // Use stored parameters
+
+    flash_params_t params = flash_params(req);
 
     ESP_LOGI(TAG, "Starting streaming firmware flash, content size: %zu bytes", content_length);
 
@@ -258,7 +207,7 @@ esp_err_t upload_post_handler(httpd_req_t* req)
         goto cleanup_early;
     }
 
-    ESP_LOGI(TAG, "Using flash base address: 0x%08lX", flash_base_addr);
+    ESP_LOGI(TAG, "Using flash base address: 0x%08lX", params.base_addr);
 
     // Calculate actual firmware size (exclude headers and trailing boundary)
     // Trailing boundary is typically ~50-100 bytes: \r\n------WebKitFormBoundary...\r\n
@@ -287,10 +236,10 @@ esp_err_t upload_post_handler(httpd_req_t* req)
     }
 
     bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", connection_params.use_swd ? "SWD" : "JTAG");
-    if (connection_params.use_swd ? adiv5_swd_scan() : jtag_scan())
+    ESP_LOGI(TAG, "Scanning via %s...", params.use_swd ? "SWD" : "JTAG");
+    if (params.use_swd ? adiv5_swd_scan() : jtag_scan())
     {
-        ESP_LOGI(TAG, "Target found via %s", connection_params.use_swd ? "SWD" : "JTAG");
+        ESP_LOGI(TAG, "Target found via %s", params.use_swd ? "SWD" : "JTAG");
         target_found = true;
     }
 
@@ -329,8 +278,8 @@ esp_err_t upload_post_handler(httpd_req_t* req)
     ESP_LOGI(TAG, "Target halted");
 
     // Step 5: Erase flash
-    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", flash_base_addr, firmware_size);
-    if (!target_flash_erase(target, flash_base_addr, firmware_size))
+    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", params.base_addr, firmware_size);
+    if (!target_flash_erase(target, params.base_addr, firmware_size))
     {
         ESP_LOGE(TAG, "Flash erase failed");
         goto cleanup;
@@ -382,7 +331,7 @@ esp_err_t upload_post_handler(httpd_req_t* req)
 
         if (bytes_to_flash >= FLASH_CHUNK_SIZE || (total_written + bytes_to_flash >= target_bytes_to_write))
         {
-            if (!target_flash_write(target, flash_base_addr + total_written, chunk_buffer, bytes_to_flash))
+            if (!target_flash_write(target, params.base_addr + total_written, chunk_buffer, bytes_to_flash))
             {
                 ESP_LOGE(TAG, "Flash write failed at offset %zu", total_written);
                 goto cleanup;
@@ -472,11 +421,12 @@ cleanup_early:
 /* Flash erase handler */
 esp_err_t erase_post_handler(httpd_req_t* req)
 {
-    target_s*   target          = NULL;
-    bool        success         = false;
-    const char* error_msg       = "Error: Flash operation failed";
-    uint32_t    flash_base_addr = connection_params.base_addr;  // Use stored parameters
-    size_t      erase_len       = 0;                            // Erase 1 MB from the base address
+    target_s*   target    = NULL;
+    bool        success   = false;
+    const char* error_msg = "Error: Flash operation failed";
+    size_t      erase_len = 0;  // Erase 1 MB from the base address
+
+    flash_params_t params = flash_params(req);
 
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
@@ -492,10 +442,10 @@ esp_err_t erase_post_handler(httpd_req_t* req)
 
     // Step 2: Scan for target
     bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", connection_params.use_swd ? "SWD" : "JTAG");
-    if (connection_params.use_swd ? adiv5_swd_scan() : jtag_scan())
+    ESP_LOGI(TAG, "Scanning via %s...", params.use_swd ? "SWD" : "JTAG");
+    if (params.use_swd ? adiv5_swd_scan() : jtag_scan())
     {
-        ESP_LOGI(TAG, "Target found via %s", connection_params.use_swd ? "SWD" : "JTAG");
+        ESP_LOGI(TAG, "Target found via %s", params.use_swd ? "SWD" : "JTAG");
         target_found = true;
     }
 
@@ -543,12 +493,12 @@ esp_err_t erase_post_handler(httpd_req_t* req)
         }
         flash_it = flash_it->next;
     }
-    
+
     char read_len_str[12];
     itoa(erase_len, read_len_str, 10);
     // Step 5: Erase flash
-    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", flash_base_addr, erase_len);
-    if (!target_flash_erase(target, flash_base_addr, erase_len))
+    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", params.base_addr, erase_len);
+    if (!target_flash_erase(target, params.base_addr, erase_len))
     {
         ESP_LOGE(TAG, "Flash erase failed");
         error_msg = "Error: Flash erase failed";
@@ -590,13 +540,14 @@ cleanup_early:
 /* Flash read handler */
 esp_err_t read_post_handler(httpd_req_t* req)
 {
-    target_s*   target          = NULL;
-    bool        success         = false;
-    const char* error_msg       = "Error: Flash operation failed";
-    uint32_t    flash_base_addr = connection_params.base_addr;  // Use stored parameters
-    size_t      read_len        = 0;
-    uint8_t*    chunk_buffer    = malloc(FLASH_CHUNK_SIZE);
-    bool        stream_started  = false;
+    target_s*   target         = NULL;
+    bool        success        = false;
+    const char* error_msg      = "Error: Flash operation failed";
+    size_t      read_len       = 0;
+    uint8_t*    chunk_buffer   = malloc(FLASH_CHUNK_SIZE);
+    bool        stream_started = false;
+
+    flash_params_t params = flash_params(req);
 
     if (!chunk_buffer)
     {
@@ -619,10 +570,10 @@ esp_err_t read_post_handler(httpd_req_t* req)
 
     // Step 2: Scan for target
     bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", connection_params.use_swd ? "SWD" : "JTAG");
-    if (connection_params.use_swd ? adiv5_swd_scan() : jtag_scan())
+    ESP_LOGI(TAG, "Scanning via %s...", params.use_swd ? "SWD" : "JTAG");
+    if (params.use_swd ? adiv5_swd_scan() : jtag_scan())
     {
-        ESP_LOGI(TAG, "Target found via %s", connection_params.use_swd ? "SWD" : "JTAG");
+        ESP_LOGI(TAG, "Target found via %s", params.use_swd ? "SWD" : "JTAG");
         target_found = true;
     }
 
@@ -672,7 +623,7 @@ esp_err_t read_post_handler(httpd_req_t* req)
     }
 
     // Step 5: Read flash and stream it to the client
-    ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", flash_base_addr, read_len);
+    ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", params.base_addr, read_len);
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"flash_dump.bin\"");
     char read_len_str[12];
@@ -683,9 +634,9 @@ esp_err_t read_post_handler(httpd_req_t* req)
     for (size_t offset = 0; offset < read_len;)
     {
         size_t chunk = MIN(read_len - offset, FLASH_CHUNK_SIZE);
-        if (target_mem32_read(target, chunk_buffer, flash_base_addr + offset, chunk))
+        if (target_mem32_read(target, chunk_buffer, params.base_addr + offset, chunk))
         {
-            ESP_LOGE(TAG, "Flash read failed at 0x%08lX", flash_base_addr + offset);
+            ESP_LOGE(TAG, "Flash read failed at 0x%08lX", params.base_addr + offset);
             error_msg = "Error: Flash read failed";
             httpd_resp_send_chunk(req, NULL, 0);
             goto cleanup;

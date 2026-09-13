@@ -12,7 +12,6 @@
 
 #define TAG "network-http"
 
-esp_err_t connection_params_post_handler(httpd_req_t *req);
 esp_err_t upload_post_handler(httpd_req_t *req);
 esp_err_t erase_post_handler(httpd_req_t *req);
 esp_err_t read_post_handler(httpd_req_t *req);
@@ -66,11 +65,6 @@ static const httpd_uri_t read_post_uri = {
     .uri = "/read",
     .method = HTTP_POST,
     .handler = read_post_handler};
-
-static const httpd_uri_t connection_params_uri = {
-    .uri = "/connection-params",
-    .method = HTTP_POST,
-    .handler = connection_params_post_handler};
 
 static const httpd_uri_t nvs_settings_get_uri = {
     .uri = "/nvs-settings",
@@ -149,7 +143,6 @@ static httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &upload);
     httpd_register_uri_handler(server, &erase);
-    httpd_register_uri_handler(server, &connection_params_uri);
     httpd_register_uri_handler(server, &nvs_settings_get_uri);
     httpd_register_uri_handler(server, &nvs_settings_post_uri);
     httpd_register_uri_handler(server, &favicon_uri);

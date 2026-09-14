@@ -129,9 +129,11 @@ static flash_params_t flash_params(httpd_req_t* req)
     {
         char val[32];
         if (httpd_query_key_value(query, "baseAddr", val, sizeof(val)) == ESP_OK)
-            params.base_addr = strtoul(val, NULL, 0);
+            params.base_addr = strtoul(val, NULL, 16);
         if (httpd_query_key_value(query, "iface", val, sizeof(val)) == ESP_OK)
             params.use_swd = (strncmp(val, "swd", 3) == 0);
+        if (httpd_query_key_value(query, "length", val, sizeof(val)) == ESP_OK)
+            params.length = strtoul(val, NULL, 10);
     }
     return params;
 }
@@ -398,8 +400,7 @@ cleanup:
     gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 cleanup_early:
-    char pkt_disable_noack[] = "\x04";
-    gdb_glue_receive((uint8_t*) pkt_disable_noack, 1);
+    gdb_glue_receive((uint8_t*) "\x04", 1); // disable noack
     if (header_buffer)
         free(header_buffer);
     if (chunk_buffer)
@@ -482,21 +483,28 @@ esp_err_t erase_post_handler(httpd_req_t* req)
     }
 
     ESP_LOGI(TAG, "Target halted");
-
     region_info(target);
-    target_flash_s* flash_it = target->flash;
-    while (flash_it)
+
+    // Step 5: Erase flash
+    if (params.length == 0)
     {
-        if (flash_it->start & 0x08000000)
+        target_flash_s* flash_it = target->flash;
+        while (flash_it)
         {
-            erase_len += flash_it->length;
+            if (flash_it->start & 0x08000000)
+            {
+                erase_len += flash_it->length;
+            }
+            flash_it = flash_it->next;
         }
-        flash_it = flash_it->next;
+    }
+    else
+    {
+        erase_len = params.length;
     }
 
     char read_len_str[12];
     itoa(erase_len, read_len_str, 10);
-    // Step 5: Erase flash
     ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", params.base_addr, erase_len);
     if (!target_flash_erase(target, params.base_addr, erase_len))
     {
@@ -521,8 +529,7 @@ cleanup:
     gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 cleanup_early:
-    char pkt_disable_noack[] = "\x04";
-    gdb_glue_receive((uint8_t*) pkt_disable_noack, 1);
+    gdb_glue_receive((uint8_t*) "\x04", 1); // disable noack
 
     if (success)
     {
@@ -610,19 +617,25 @@ esp_err_t read_post_handler(httpd_req_t* req)
     }
 
     ESP_LOGI(TAG, "Target halted");
-
     region_info(target);
-    target_flash_s* flash_it = target->flash;
-    while (flash_it)
-    {
-        if (flash_it->start & 0x08000000)
-        {
-            read_len += flash_it->length;
-        }
-        flash_it = flash_it->next;
-    }
 
     // Step 5: Read flash and stream it to the client
+    if (params.length == 0)
+    {
+        target_flash_s* flash_it = target->flash;
+        while (flash_it)
+        {
+            if (flash_it->start & 0x08000000)
+            {
+                read_len += flash_it->length;
+            }
+            flash_it = flash_it->next;
+        }
+    }
+    else
+    {
+        read_len = params.length;
+    }
     ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", params.base_addr, read_len);
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"flash_dump.bin\"");

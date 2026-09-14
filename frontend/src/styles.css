@@ -128,12 +128,25 @@ input[type='file'] {
     width: 200px;
 }
 
+.length-row {
+    display: flex;
+    gap: 8px;
+    width: 216px; /* = outer width of baseAddr input: 200px + 2x8px padding */
+    margin: 0 auto; /* center the row so its edges line up with baseAddr */
+}
+
+.length-row input {
+    flex: 1;
+    min-width: 0;
+}
+
 .iface-select {
     margin: 20px 0;
 }
 
 .radio-group {
     display: flex;
+    justify-content: center;
     gap: 20px;
 }
 

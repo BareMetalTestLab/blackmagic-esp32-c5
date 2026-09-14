@@ -35,7 +35,18 @@
                 <div class='settings-content'>
                     <div class='addr-input'>
                         <label for='baseAddr'>Flash Base Address (hex):</label>
-                        <input type='text' id='baseAddr' value='0x08000000' pattern='0x[0-9A-Fa-f]{8}'>
+                        <input type='text' id='baseAddr' value='08000000' maxlength='8' pattern='[0-9A-Fa-f]{8}'>
+                    </div>
+                    <div class='addr-input'>
+                        <label>Firmware Length (hex or dec):</label>
+                        <div class='length-row'>
+                            <input type='text' id='fwLength' value='00000000' maxlength='8' pattern='[0-9A-Fa-f]{8}' placeholder='hex'>
+                            <input type='text' id='fwLengthDec' value='0' maxlength='10' placeholder='dec'>
+                        </div>
+                    </div>
+                    <div class='addr-input'>
+                        <label for='fwEndAddr'>Firmware End Address (hex):</label>
+                        <input type='text' id='fwEndAddr' value='08000000' maxlength='8' pattern='[0-9A-Fa-f]{8}'>
                     </div>
                     <div class='iface-select'>
                         <label>Programming Interface:</label>

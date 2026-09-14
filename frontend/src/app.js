@@ -183,6 +183,71 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
     }
 });
 
+// Firmware length / end address: two-way auto calculation anchored at baseAddr
+const baseAddrInput = document.getElementById('baseAddr');
+const fwLengthInput = document.getElementById('fwLength');
+const fwEndAddrInput = document.getElementById('fwEndAddr');
+const fwLengthDecInput = document.getElementById('fwLengthDec');
+
+function parseHexInput(input) {
+    const v = parseInt(input.value, 16);
+    return isNaN(v) ? null : v;
+}
+
+function formatHexAddr(v) {
+    return v.toString(16).toUpperCase().padStart(8, '0');
+}
+
+function updateEndAddrFromLength() {
+    const base = parseHexInput(baseAddrInput);
+    const length = parseHexInput(fwLengthInput);
+    if (base === null || length === null) return;
+    fwEndAddrInput.value = formatHexAddr(base + length);
+    fwLengthDecInput.value = length.toString(10);
+}
+
+function updateLengthFromEndAddr() {
+    const base = parseHexInput(baseAddrInput);
+    const end = parseHexInput(fwEndAddrInput);
+    if (base === null || end === null || end < base) return;
+    fwLengthInput.value = formatHexAddr(end - base);
+    fwLengthDecInput.value = (end - base).toString(10);
+}
+
+// Live filtering: only hex digits, max 8 characters (no 0x prefix)
+function sanitizeHexInput(input) {
+    const raw = input.value;
+    const clean = raw.replace(/[^0-9A-Fa-f]/g, '').toUpperCase().slice(0, 8);
+    if (raw !== clean) {
+        const caret = input.selectionStart === null ? clean.length : Math.min(input.selectionStart, clean.length);
+        input.value = clean;
+        input.setSelectionRange(caret, caret);
+    }
+}
+
+// Live filtering: only decimal digits, max 10 characters (max 4294967295)
+function sanitizeDecInput(input) {
+    const raw = input.value;
+    const clean = raw.replace(/[^0-9]/g, '').slice(0, 10);
+    if (raw !== clean) {
+        const caret = input.selectionStart === null ? clean.length : Math.min(input.selectionStart, clean.length);
+        input.value = clean;
+        input.setSelectionRange(caret, caret);
+    }
+}
+
+fwLengthInput.addEventListener('input', () => { sanitizeHexInput(fwLengthInput); updateEndAddrFromLength(); });
+fwLengthDecInput.addEventListener('input', () => {
+    sanitizeDecInput(fwLengthDecInput);
+    const d = parseInt(fwLengthDecInput.value, 10);
+    if (!isNaN(d)) {
+        fwLengthInput.value = formatHexAddr(d);
+        updateEndAddrFromLength();
+    }
+});
+fwEndAddrInput.addEventListener('input', () => { sanitizeHexInput(fwEndAddrInput); updateLengthFromEndAddr(); });
+baseAddrInput.addEventListener('input', () => { sanitizeHexInput(baseAddrInput); updateEndAddrFromLength(); });
+
 // Erase flash button functionality
 document.getElementById('eraseBtn').addEventListener('click', async () => {
     const eraseBtn = document.getElementById('eraseBtn');
@@ -200,6 +265,7 @@ document.getElementById('eraseBtn').addEventListener('click', async () => {
 
     const baseAddr = document.getElementById('baseAddr').value;
     const iface = document.querySelector('input[name="iface"]:checked').value;
+    const length = document.getElementById('fwLengthDec').value;
 
     const reenableBtn = () => {
         eraseBtn.disabled = false;
@@ -238,7 +304,7 @@ document.getElementById('eraseBtn').addEventListener('click', async () => {
         });
 
         xhr.open('POST', '/erase?baseAddr=' + encodeURIComponent(baseAddr) +
-            '&iface=' + encodeURIComponent(iface));
+            '&iface=' + encodeURIComponent(iface) + '&length=' + encodeURIComponent(length));
         xhr.send();
     } catch (error) {
         status.textContent = '✗ Erase failed: ' + error.message;
@@ -264,6 +330,7 @@ readFlashBtn.addEventListener('click', async () => {
 
     const baseAddr = document.getElementById('baseAddr').value;
     const iface = document.querySelector('input[name="iface"]:checked').value;
+    const length = document.getElementById('fwLengthDec').value;
 
     const reenableBtn = () => {
         readFlashBtn.disabled = false;
@@ -278,7 +345,7 @@ readFlashBtn.addEventListener('click', async () => {
     // Step 2: Read flash and download the dump (binary response)
     try {
         const res = await fetch('/read?baseAddr=' + encodeURIComponent(baseAddr) +
-            '&iface=' + encodeURIComponent(iface), { method: 'POST' });
+            '&iface=' + encodeURIComponent(iface) + '&length=' + encodeURIComponent(length), { method: 'POST' });
 
         if (!res.ok) {
             const errorText = await res.text();

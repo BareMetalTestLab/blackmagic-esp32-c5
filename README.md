@@ -2,6 +2,17 @@
 
 Black Magic Probe firmware for ESP32-C5 (and other ESP32-Cx chips). Turns the board into a wireless debug adapter: GDB connects over Wi-Fi, no OpenOCD required.
 
+## Web UI
+
+![Flash firmware web UI](docs/main.png)
+*Flash Firmware tab — flash, erase, or read the target's flash without debugging. Advanced Settings let you set the flash base address, length or end address, and choose the SWD/JTAG interface.*
+
+![Pin configuration web UI](docs/pin_config.png)
+*Pin Configuration — set GPIO numbers for SWDIO, SWCLK, TDI, TDO and TRST.*
+
+![Network configuration web UI](docs/network_config.png)
+*Network Configuration — Wi-Fi SSID, password and device hostname.*
+
 | Port | Purpose |
 | --- | --- |
 | `80` | Web UI — OTA flash, Wi-Fi credentials, GPIO pin assignment |
@@ -137,14 +148,6 @@ All pins are overridable at runtime through the web UI (stored in NVS).
 | TRST | 27 |
 
 SWD and JTAG share SWDIO/TMS and SWCLK/TCK lines (standard Black Magic Probe convention).
-
-## Web UI
-
-![Pin configuration web UI](docs/pin_config.png)
-*Pin Configuration — set GPIO numbers for SWDIO, SWCLK, TDI, TDO and TRST.*
-
-![Network configuration web UI](docs/network_config.png)
-*Network Configuration — Wi-Fi SSID, password and device hostname.*
 
 ### Frontend development
 

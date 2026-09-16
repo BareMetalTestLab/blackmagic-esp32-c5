@@ -18,6 +18,8 @@ jobs:
         target: [esp32c6, esp32c5]
     env:
       IDF_VERSION: v5.5.2
+      # Export IDF_TARGET so CMake project() name becomes blackmagic-esp32c6/esp32c5
+      IDF_TARGET: ${{ matrix.target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

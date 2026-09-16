@@ -2,6 +2,13 @@
 
 Black Magic Probe firmware for ESP32-C5 (and other ESP32-Cx chips). Turns the board into a wireless debug adapter: GDB connects over Wi-Fi, no OpenOCD required.
 
+## Flash
+You can get full (merged) binary file from [Releases](https://github.com/BareMetalTestLab/blackmagic-esp32-c5/releases) and flash it:
+```bash
+$ pip install --upgrade esptool
+$ esptool.py --chip esp32c5 --port /dev/cu.usbmodemXXXX --baud 921600 write_flash 0x0 blackmagic-v1.0.0-esp32c5-merged.bin
+```
+
 ## Web UI
 
 ![Flash firmware web UI](docs/main.png)

@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js (frontend build inside CMake)
         uses: actions/setup-node@v4
@@ -58,8 +60,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           TARGET="${{ matrix.target }}"
           mkdir -p dist
-          cp build/blackmagic-esp32-c5.bin  "dist/blackmagic-${VERSION}-${TARGET}.bin"
-          cp build/blackmagic-esp32-c5.elf  "dist/blackmagic-${VERSION}-${TARGET}.elf"
+          cp "build/blackmagic-${TARGET}.bin" "dist/blackmagic-${VERSION}-${TARGET}.bin"
+          cp "build/blackmagic-${TARGET}.elf" "dist/blackmagic-${VERSION}-${TARGET}.elf"
           cp build/bootloader/bootloader.bin           "dist/bootloader-${VERSION}-${TARGET}.bin"
           cp build/partition_table/partition-table.bin "dist/partition-table-${VERSION}-${TARGET}.bin"
           cp build/flash_args "dist/flash_args-${VERSION}-${TARGET}"

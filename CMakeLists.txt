@@ -14,4 +14,12 @@ add_definitions(-DENABLE_USB_GDB=1)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
-project(blackmagic-esp32-c5)
+
+# Project name (and therefore binary name) depends on the target chip:
+# blackmagic-esp32c5 / blackmagic-esp32c6. IDF_TARGET must be set in the
+# environment (CI sets it from the build matrix); fall back to esp32c5.
+if(DEFINED ENV{IDF_TARGET})
+    project(blackmagic-$ENV{IDF_TARGET})
+else()
+    project(blackmagic-esp32-c5)
+endif()

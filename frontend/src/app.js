@@ -174,7 +174,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
         });
 
         xhr.open('POST', '/upload?baseAddr=' + encodeURIComponent(baseAddr) +
-            '&iface=' + encodeURIComponent(iface));
+            '&iface=' + encodeURIComponent(iface) + '&length=' + file.size);
         xhr.send(formData);
     } catch (error) {
         status.textContent = '✗ Upload failed: ' + error.message;

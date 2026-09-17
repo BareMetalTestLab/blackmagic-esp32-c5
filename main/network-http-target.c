@@ -211,10 +211,14 @@ esp_err_t upload_post_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "Using flash base address: 0x%08lX", params.base_addr);
 
-    // Calculate actual firmware size (exclude headers and trailing boundary)
-    // Trailing boundary is typically ~50-100 bytes: \r\n------WebKitFormBoundary...\r\n
-    size_t estimated_boundary_size = 100;
-    size_t firmware_size           = content_length - data_start_offset - estimated_boundary_size;
+    size_t firmware_size = params.length;
+    if (firmware_size == 0)
+    {
+        ESP_LOGE(TAG, "Recieved 0 size of firmware");
+        error_msg = "Error: Recieved 0 size of firmware";
+        goto cleanup_early;
+    }
+
     ESP_LOGI(TAG,
              "Estimated firmware size: %zu bytes (content: %zu, headers: %zu)",
              firmware_size,
@@ -400,7 +404,7 @@ cleanup:
     gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 cleanup_early:
-    gdb_glue_receive((uint8_t*) "\x04", 1); // disable noack
+    gdb_glue_receive((uint8_t*) "\x04", 1);  // disable noack
     if (header_buffer)
         free(header_buffer);
     if (chunk_buffer)
@@ -529,7 +533,7 @@ cleanup:
     gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 cleanup_early:
-    gdb_glue_receive((uint8_t*) "\x04", 1); // disable noack
+    gdb_glue_receive((uint8_t*) "\x04", 1);  // disable noack
 
     if (success)
     {

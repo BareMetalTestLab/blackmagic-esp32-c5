@@ -428,6 +428,7 @@ tabButtons.forEach(button => {
 // Settings form functionality
 const settingsForm = document.getElementById('settingsForm');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+const saveTokenBtn = document.getElementById('saveTokenBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 
 // Load current settings function
@@ -504,6 +505,18 @@ settingsForm.addEventListener('submit', async (e) => {
     }
 });
 
+async function loadToken() {
+    try {
+        const response = await fetch('/token');
+        if (!response.ok) throw new Error('Failed to load pins');
+        const data = await response.json();
+
+        document.getElementById('host_token').value = data.host_token;
+    } catch (error) {
+        console.error('Error loading host token:', error);
+    }
+}
+
 // Auto-load settings when settings tab is opened
 tabButtons.forEach(button => {
     button.addEventListener('click', () => {
@@ -513,6 +526,9 @@ tabButtons.forEach(button => {
         }
         if (button.getAttribute('data-tab') === 'networks') {
             loadNetworks();
+        }
+        if (button.getAttribute('data-tab') === 'token') {
+            loadToken();
         }
     });
 });
@@ -609,6 +625,37 @@ document.getElementById('defaultPinsBtn').addEventListener('click', async () => 
     } finally {
         defaultPinsBtn.disabled = false;
         setTimeout(() => { pinsStatus.textContent = ''; pinsStatus.className = ''; }, 4000);
+    }
+});
+
+// Update token
+document.getElementById('saveTokenBtn').addEventListener('click', async () => {
+    const saveTokenBtn = document.getElementById('saveTokenBtn');
+    document.getElementById('saveTokenBtn').disabled = true;
+
+    try {
+        const params = new URLSearchParams({
+            host_token: document.getElementById('host_token').value,
+            token: document.getElementById('token').value,
+        });
+
+        const response = await fetch('/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString()
+        });
+
+        if (!response.ok) throw new Error('Failed to set token');
+        const result = await response.json();
+
+        if (!result.success) throw new Error('Failed to set token');
+        setTimeout(() => {
+            showError('Timedout: ' + '/token');
+        }, 4000);
+    } catch (error) {
+        showError(error);
+    } finally {
+        document.getElementById('saveTokenBtn').disabled = false;
     }
 });
 
@@ -785,4 +832,20 @@ function showNetworksStatus(msg, cls) {
     el.textContent = msg;
     el.className = cls;
     setTimeout(() => { el.textContent = ''; el.className = ''; }, 4000);
+}
+
+function showError(message, duration = 2000) {
+    const container = document.getElementById('toast-container');
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => toast.classList.add('show'));
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, duration);
 }

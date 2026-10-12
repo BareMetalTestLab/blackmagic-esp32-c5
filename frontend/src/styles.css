@@ -10,7 +10,7 @@
 
 body {
     font-family: Arial, sans-serif;
-    max-width: 700px;
+    max-width: 800px;
     margin: 50px auto;
     padding: 20px;
     position: relative;
@@ -462,3 +462,33 @@ button:disabled {
     width: auto;
     margin: 0;
 }
+
+#toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 9999;
+  }
+
+  .toast {
+    background: var(--accent);
+    color: var(--text);
+    padding: 14px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    font-size: 14px;
+    min-width: 250px;
+    max-width: 350px;
+
+    opacity: 0;
+    transform: translateX(100%);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateX(0);
+  }

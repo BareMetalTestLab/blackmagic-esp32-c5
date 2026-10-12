@@ -18,6 +18,8 @@ esp_err_t read_post_handler(httpd_req_t *req);
 
 esp_err_t nvs_settings_post_handler(httpd_req_t *req);
 esp_err_t nvs_settings_get_handler(httpd_req_t *req);
+esp_err_t nvs_token_post_handler(httpd_req_t *req);
+esp_err_t nvs_token_get_handler(httpd_req_t *req);
 
 esp_err_t reboot_post_handler(httpd_req_t *req);
 
@@ -75,6 +77,16 @@ static const httpd_uri_t nvs_settings_post_uri = {
     .uri = "/nvs-settings",
     .method = HTTP_POST,
     .handler = nvs_settings_post_handler};
+
+static const httpd_uri_t nvs_token_post_uri = {
+    .uri = "/token",
+    .method = HTTP_POST,
+    .handler = nvs_token_post_handler};
+
+static const httpd_uri_t nvs_token_get_uri = {
+    .uri = "/token",
+    .method = HTTP_GET,
+    .handler = nvs_token_get_handler};
 
 static const httpd_uri_t favicon_uri = {
     .uri = "/favicon.ico",
@@ -155,6 +167,8 @@ static httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &networks_update_uri);
     httpd_register_uri_handler(server, &networks_delete_uri);
     httpd_register_uri_handler(server, &read_post_uri);
+    httpd_register_uri_handler(server, &nvs_token_get_uri);
+    httpd_register_uri_handler(server, &nvs_token_post_uri);
     return server;
 }
 

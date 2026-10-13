@@ -1,36 +1,33 @@
 #include <network-http.h>
 #include <esp_http_server.h>
-#include "esp_event.h"
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <esp_system.h>
 #include <sys/param.h>
 #include <string.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include "network-http-page.h"
 
 #define TAG "network-http"
 
-esp_err_t upload_post_handler(httpd_req_t *req);
-esp_err_t erase_post_handler(httpd_req_t *req);
-esp_err_t read_post_handler(httpd_req_t *req);
-
-esp_err_t nvs_settings_post_handler(httpd_req_t *req);
-esp_err_t nvs_settings_get_handler(httpd_req_t *req);
-esp_err_t nvs_token_post_handler(httpd_req_t *req);
-esp_err_t nvs_token_get_handler(httpd_req_t *req);
-
 esp_err_t reboot_post_handler(httpd_req_t *req);
 
-esp_err_t pins_post_handler(httpd_req_t *req);
-esp_err_t pins_default_post_handler(httpd_req_t *req);
-esp_err_t pins_get_handler(httpd_req_t *req);
+esp_err_t target_flash_upload_post_handler(httpd_req_t *req);
+esp_err_t target_flash_erase_post_handler(httpd_req_t *req);
+esp_err_t target_flash_read_post_handler(httpd_req_t *req);
 
-esp_err_t networks_get_handler(httpd_req_t *req);
-esp_err_t networks_add_handler(httpd_req_t *req);
-esp_err_t networks_update_handler(httpd_req_t *req);
-esp_err_t networks_delete_handler(httpd_req_t *req);
+esp_err_t settings_mdns_post_handler(httpd_req_t *req);
+esp_err_t settings_mdns_get_handler(httpd_req_t *req);
+
+esp_err_t settings_cloud_post_handler(httpd_req_t *req);
+esp_err_t settings_cloud_get_handler(httpd_req_t *req);
+
+esp_err_t settings_pins_get_handler(httpd_req_t *req);
+esp_err_t settings_pins_post_handler(httpd_req_t *req);
+
+esp_err_t settings_networks_get_handler(httpd_req_t *req);
+esp_err_t settings_networks_post_handler(httpd_req_t *req);
+esp_err_t settings_networks_patch_handler(httpd_req_t *req);
+esp_err_t settings_networks_delete_handler(httpd_req_t *req);
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
@@ -40,98 +37,80 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* Favicon handler to suppress 404 warnings */
-static esp_err_t favicon_get_handler(httpd_req_t *req)
-{
-    httpd_resp_set_status(req, "204 No Content");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
 static const httpd_uri_t root = {
     .uri = "/",
     .method = HTTP_GET,
     .handler = root_get_handler};
-
-static const httpd_uri_t upload = {
-    .uri = "/upload",
-    .method = HTTP_POST,
-    .handler = upload_post_handler};
-
-static const httpd_uri_t erase = {
-    .uri = "/erase",
-    .method = HTTP_POST,
-    .handler = erase_post_handler};
-
-static const httpd_uri_t read_post_uri = {
-    .uri = "/read",
-    .method = HTTP_POST,
-    .handler = read_post_handler};
-
-static const httpd_uri_t nvs_settings_get_uri = {
-    .uri = "/nvs-settings",
-    .method = HTTP_GET,
-    .handler = nvs_settings_get_handler};
-
-static const httpd_uri_t nvs_settings_post_uri = {
-    .uri = "/nvs-settings",
-    .method = HTTP_POST,
-    .handler = nvs_settings_post_handler};
-
-static const httpd_uri_t nvs_token_post_uri = {
-    .uri = "/token",
-    .method = HTTP_POST,
-    .handler = nvs_token_post_handler};
-
-static const httpd_uri_t nvs_token_get_uri = {
-    .uri = "/token",
-    .method = HTTP_GET,
-    .handler = nvs_token_get_handler};
-
-static const httpd_uri_t favicon_uri = {
-    .uri = "/favicon.ico",
-    .method = HTTP_GET,
-    .handler = favicon_get_handler};
 
 static const httpd_uri_t reboot_uri = {
     .uri = "/reboot",
     .method = HTTP_POST,
     .handler = reboot_post_handler};
 
-static const httpd_uri_t pins_get_uri = {
-    .uri = "/pins",
+static const httpd_uri_t target_flash_upload_post_uri = {
+    .uri = "/target/flash/upload",
+    .method = HTTP_POST,
+    .handler = target_flash_upload_post_handler};
+
+static const httpd_uri_t target_flash_erase_post_uri = {
+    .uri = "/target/flash/erase",
+    .method = HTTP_POST,
+    .handler = target_flash_erase_post_handler};
+
+static const httpd_uri_t target_flash_read_post_uri = {
+    .uri = "/target/flash/read",
+    .method = HTTP_POST,
+    .handler = target_flash_read_post_handler};
+
+static const httpd_uri_t settings_mdns_get_uri = {
+    .uri = "/settings/mdns",
     .method = HTTP_GET,
-    .handler = pins_get_handler};
+    .handler = settings_mdns_get_handler};
 
-static const httpd_uri_t pins_post_uri = {
-    .uri = "/pins",
+static const httpd_uri_t settings_mdns_post_uri = {
+    .uri = "/settings/mdns",
     .method = HTTP_POST,
-    .handler = pins_post_handler};
+    .handler = settings_mdns_post_handler};
 
-static const httpd_uri_t pins_default_post_uri = {
-    .uri = "/pins-default",
+static const httpd_uri_t settings_cloud_post_uri = {
+    .uri = "/settings/cloud",
     .method = HTTP_POST,
-    .handler = pins_default_post_handler};
+    .handler = settings_cloud_post_handler};
 
-static const httpd_uri_t networks_get_uri = {
-    .uri = "/networks",
+static const httpd_uri_t settings_cloud_get_uri = {
+    .uri = "/settings/cloud",
     .method = HTTP_GET,
-    .handler = networks_get_handler};
+    .handler = settings_cloud_get_handler};
 
-static const httpd_uri_t networks_add_uri = {
-    .uri = "/networks/add",
-    .method = HTTP_POST,
-    .handler = networks_add_handler};
+static const httpd_uri_t settings_pins_get_uri = {
+    .uri = "/settings/pins",
+    .method = HTTP_GET,
+    .handler = settings_pins_get_handler};
 
-static const httpd_uri_t networks_update_uri = {
-    .uri = "/networks/update",
+static const httpd_uri_t settings_pins_post_uri = {
+    .uri = "/settings/pins",
     .method = HTTP_POST,
-    .handler = networks_update_handler};
+    .handler = settings_pins_post_handler};
 
-static const httpd_uri_t networks_delete_uri = {
-    .uri = "/networks/delete",
+static const httpd_uri_t settings_networks_get_uri = {
+    .uri = "/settings/networks",
+    .method = HTTP_GET,
+    .handler = settings_networks_get_handler};
+
+static const httpd_uri_t settings_networks_post_uri = {
+    .uri = "/settings/networks",
     .method = HTTP_POST,
-    .handler = networks_delete_handler};
+    .handler = settings_networks_post_handler};
+
+static const httpd_uri_t settings_networks_patch_uri = {
+    .uri = "/settings/networks",
+    .method = HTTP_PATCH,
+    .handler = settings_networks_patch_handler};
+
+static const httpd_uri_t settings_networks_delete_uri = {
+    .uri = "/settings/networks",
+    .method = HTTP_DELETE,
+    .handler = settings_networks_delete_handler};
 
 static httpd_handle_t start_webserver(void)
 {
@@ -141,7 +120,7 @@ static httpd_handle_t start_webserver(void)
     ESP_LOGI(TAG, "Starting server");
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
-    conf.max_uri_handlers = 16;
+    conf.max_uri_handlers = 17;
 
     esp_err_t ret = httpd_start(&server, &conf);
     if (ESP_OK != ret)
@@ -153,22 +132,20 @@ static httpd_handle_t start_webserver(void)
     // Set URI handlers
     ESP_LOGI(TAG, "Registering URI handlers");
     httpd_register_uri_handler(server, &root);
-    httpd_register_uri_handler(server, &upload);
-    httpd_register_uri_handler(server, &erase);
-    httpd_register_uri_handler(server, &nvs_settings_get_uri);
-    httpd_register_uri_handler(server, &nvs_settings_post_uri);
-    httpd_register_uri_handler(server, &favicon_uri);
     httpd_register_uri_handler(server, &reboot_uri);
-    httpd_register_uri_handler(server, &pins_get_uri);
-    httpd_register_uri_handler(server, &pins_post_uri);
-    httpd_register_uri_handler(server, &pins_default_post_uri);
-    httpd_register_uri_handler(server, &networks_get_uri);
-    httpd_register_uri_handler(server, &networks_add_uri);
-    httpd_register_uri_handler(server, &networks_update_uri);
-    httpd_register_uri_handler(server, &networks_delete_uri);
-    httpd_register_uri_handler(server, &read_post_uri);
-    httpd_register_uri_handler(server, &nvs_token_get_uri);
-    httpd_register_uri_handler(server, &nvs_token_post_uri);
+    httpd_register_uri_handler(server, &target_flash_upload_post_uri);
+    httpd_register_uri_handler(server, &target_flash_read_post_uri);
+    httpd_register_uri_handler(server, &target_flash_erase_post_uri);
+    httpd_register_uri_handler(server, &settings_mdns_get_uri);
+    httpd_register_uri_handler(server, &settings_mdns_post_uri);
+    httpd_register_uri_handler(server, &settings_pins_get_uri);
+    httpd_register_uri_handler(server, &settings_pins_post_uri);
+    httpd_register_uri_handler(server, &settings_networks_get_uri);
+    httpd_register_uri_handler(server, &settings_networks_post_uri);
+    httpd_register_uri_handler(server, &settings_networks_patch_uri);
+    httpd_register_uri_handler(server, &settings_networks_delete_uri);
+    httpd_register_uri_handler(server, &settings_cloud_get_uri);
+    httpd_register_uri_handler(server, &settings_cloud_post_uri);
     return server;
 }
 

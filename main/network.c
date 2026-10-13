@@ -34,7 +34,7 @@ static volatile bool s_wifi_scanning = true;
 void network_hostnames_init(void)
 {
     mstring_t *hostname = mstring_alloc();
-    nvs_config_get_hostname(hostname);
+    nvs_config_get_mdns_name(hostname);
 
     ESP_LOGI(TAG, "init mdns");
 

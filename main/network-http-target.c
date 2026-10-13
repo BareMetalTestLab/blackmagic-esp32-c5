@@ -139,7 +139,7 @@ static flash_params_t flash_params(httpd_req_t* req)
 }
 
 /* File upload handler with streaming flash */
-esp_err_t upload_post_handler(httpd_req_t* req)
+esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
 {
     uint8_t*    chunk_buffer           = NULL;
     uint8_t*    header_buffer          = NULL;
@@ -424,7 +424,7 @@ cleanup_early:
 }
 
 /* Flash erase handler */
-esp_err_t erase_post_handler(httpd_req_t* req)
+esp_err_t target_flash_erase_post_handler(httpd_req_t* req)
 {
     target_s*   target    = NULL;
     bool        success   = false;
@@ -549,7 +549,7 @@ cleanup_early:
 }
 
 /* Flash read handler */
-esp_err_t read_post_handler(httpd_req_t* req)
+esp_err_t target_flash_read_post_handler(httpd_req_t* req)
 {
     target_s*   target         = NULL;
     bool        success        = false;

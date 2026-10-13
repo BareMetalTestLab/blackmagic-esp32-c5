@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-esp_err_t nvs_config_set_hostname(const mstring_t* hostname);
-esp_err_t nvs_config_get_hostname(mstring_t* hostname);
+esp_err_t nvs_config_set_mdns_name(const mstring_t* name);
+esp_err_t nvs_config_get_mdns_name(mstring_t* name);
 
 esp_err_t nvs_config_set_pins(int32_t swdio, int32_t swclk, int32_t tdi, int32_t tdo, int32_t trst);
 esp_err_t nvs_config_get_pins(int32_t* swdio, int32_t* swclk, int32_t* tdi, int32_t* tdo, int32_t* trst);
@@ -26,5 +26,7 @@ esp_err_t nvs_config_set_network(int32_t index, const wifi_network_t* net);
 esp_err_t nvs_config_add_network(const wifi_network_t* net);
 esp_err_t nvs_config_delete_network(int32_t index);
 
-esp_err_t nvs_config_set_token(const mstring_t* host, const mstring_t* token);
-esp_err_t nvs_config_get_token(mstring_t* host, mstring_t* token);
+esp_err_t nvs_config_set_cloud_host(const mstring_t* host);
+esp_err_t nvs_config_get_cloud_host(mstring_t* host);
+esp_err_t nvs_config_set_cloud_token(const mstring_t* token);
+esp_err_t nvs_config_get_cloud_token(mstring_t* token);

@@ -8,15 +8,15 @@
 #define TAG "network-http-settings"
 
 /* NVS settings GET handler */
-esp_err_t nvs_settings_get_handler(httpd_req_t* req)
+esp_err_t settings_mdns_get_handler(httpd_req_t* req)
 {
-    mstring_t* hostname = mstring_alloc();
-    nvs_config_get_hostname(hostname);
+    mstring_t* name = mstring_alloc();
+    nvs_config_get_mdns_name(name);
 
     char resp[128];
-    snprintf(resp, sizeof(resp), "{\"hostname\":\"%s\"}", mstring_get_cstr(hostname));
+    snprintf(resp, sizeof(resp), "{\"hostname\":\"%s\"}", mstring_get_cstr(name));
 
-    mstring_free(hostname);
+    mstring_free(name);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
@@ -25,7 +25,7 @@ esp_err_t nvs_settings_get_handler(httpd_req_t* req)
 }
 
 /* NVS settings POST handler */
-esp_err_t nvs_settings_post_handler(httpd_req_t* req)
+esp_err_t settings_mdns_post_handler(httpd_req_t* req)
 {
     char   content[512];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -50,7 +50,7 @@ esp_err_t nvs_settings_post_handler(httpd_req_t* req)
     if (httpd_query_key_value(content, "hostname", hostname_str, sizeof(hostname_str)) == ESP_OK)
     {
         mstring_set(hostname, hostname_str);
-        nvs_config_set_hostname(hostname);
+        nvs_config_set_mdns_name(hostname);
         has_updates = true;
         ESP_LOGI(TAG, "Hostname updated: %s", hostname_str);
     }
@@ -70,8 +70,8 @@ esp_err_t nvs_settings_post_handler(httpd_req_t* req)
     }
 }
 
-/* Pins GET handler */
-esp_err_t pins_get_handler(httpd_req_t* req)
+/* GET /settings/pins */
+esp_err_t settings_pins_get_handler(httpd_req_t* req)
 {
     char resp[256];
     snprintf(resp,
@@ -87,32 +87,8 @@ esp_err_t pins_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-esp_err_t pins_default_post_handler(httpd_req_t* req)
-{
-    // Apply immediately
-    g_pin_tms_swdio = DEFAULT_TMS_PIN;
-    g_pin_tck_swclk = DEFAULT_TCK_PIN;
-    g_pin_tdi       = DEFAULT_TDI_PIN;
-    g_pin_tdo_swo   = DEFAULT_TDO_PIN;
-    g_pin_trst      = DEFAULT_TRST_PIN;
-
-    nvs_config_set_pins(g_pin_tms_swdio, g_pin_tck_swclk, g_pin_tdi, g_pin_tdo_swo, g_pin_trst);
-
-    ESP_LOGI(TAG,
-             "Pins updated: SWDIO=%ld SWCLK=%ld TDI=%ld TDO=%ld TRST=%ld",
-             (long) g_pin_tms_swdio,
-             (long) g_pin_tck_swclk,
-             (long) g_pin_tdi,
-             (long) g_pin_tdo_swo,
-             (long) g_pin_trst);
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
-/* Pins POST handler */
-esp_err_t pins_post_handler(httpd_req_t* req)
+/* POST /settings/pins  — body: swdio=..&swclk=..&tdi=..&tdo=..&trst=.. */
+esp_err_t settings_pins_post_handler(httpd_req_t* req)
 {
     char   content[256];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -141,22 +117,22 @@ esp_err_t pins_post_handler(httpd_req_t* req)
     if (httpd_query_key_value(content, "trst", val, sizeof(val)) == ESP_OK)
         trst = (int32_t) atoi(val);
 
-    nvs_config_set_pins(swdio, swclk, tdi, tdo, trst);
-
     // Apply immediately
-    g_pin_tms_swdio = swdio;
-    g_pin_tck_swclk = swclk;
-    g_pin_tdi       = tdi;
-    g_pin_tdo_swo   = tdo;
-    g_pin_trst      = trst;
+    g_pin_tms_swdio = swdio ? swdio : DEFAULT_TMS_PIN;
+    g_pin_tck_swclk = swclk ? swclk : DEFAULT_TCK_PIN;
+    g_pin_tdi       = tdi ? tdi : DEFAULT_TDI_PIN;
+    g_pin_tdo_swo   = tdo ? tdo : DEFAULT_TDO_PIN;
+    g_pin_trst      = trst ? trst : DEFAULT_TRST_PIN;
+
+    nvs_config_set_pins(g_pin_tms_swdio, g_pin_tck_swclk, g_pin_tdi, g_pin_tdo_swo, g_pin_trst);
 
     ESP_LOGI(TAG,
              "Pins updated: SWDIO=%ld SWCLK=%ld TDI=%ld TDO=%ld TRST=%ld",
-             (long) swdio,
-             (long) swclk,
-             (long) tdi,
-             (long) tdo,
-             (long) trst);
+             (long) g_pin_tms_swdio,
+             (long) g_pin_tck_swclk,
+             (long) g_pin_tdi,
+             (long) g_pin_tdo_swo,
+             (long) g_pin_trst);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
@@ -183,8 +159,8 @@ static size_t json_escape(char* dst, size_t dst_max, const char* src)
     return pos;
 }
 
-/* GET /networks  — returns [{idx,ssid,auto_connect}, ...] (no passwords) */
-esp_err_t networks_get_handler(httpd_req_t* req)
+/* GET /settings/networks  — returns [{idx,ssid,auto_connect}, ...] (no passwords) */
+esp_err_t settings_networks_get_handler(httpd_req_t* req)
 {
     int32_t count = 0;
     nvs_config_get_networks_count(&count);
@@ -223,8 +199,8 @@ esp_err_t networks_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-/* POST /networks/add  — body: ssid=...&pass=...&auto_connect=1 */
-esp_err_t networks_add_handler(httpd_req_t* req)
+/* POST /settings/networks  — body: ssid=...&pass=...&auto_connect=1 */
+esp_err_t settings_networks_post_handler(httpd_req_t* req)
 {
     char   content[256];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -277,8 +253,8 @@ esp_err_t networks_add_handler(httpd_req_t* req)
     }
 }
 
-/* POST /networks/update  — body: idx=0&ssid=...&pass=...&auto_connect=1 */
-esp_err_t networks_update_handler(httpd_req_t* req)
+/* PATCH /settings/networks  — body: idx=0&ssid=...&pass=...&auto_connect=1 */
+esp_err_t settings_networks_patch_handler(httpd_req_t* req)
 {
     char   content[256];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -340,8 +316,8 @@ esp_err_t networks_update_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-/* POST /networks/delete  — body: idx=0 */
-esp_err_t networks_delete_handler(httpd_req_t* req)
+/* DELETE /settings/networks  — body: idx=0 */
+esp_err_t settings_networks_delete_handler(httpd_req_t* req)
 {
     char   content[64];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -378,10 +354,10 @@ esp_err_t networks_delete_handler(httpd_req_t* req)
     }
 }
 
-esp_err_t nvs_token_get_handler(httpd_req_t* req)
+esp_err_t settings_cloud_get_handler(httpd_req_t* req)
 {
     mstring_t* host_token = mstring_alloc();
-    nvs_config_get_token(host_token, NULL);
+    nvs_config_get_cloud_host(host_token);
 
     char resp[128];
     snprintf(resp, sizeof(resp), "{\"host_token\":\"%s\"}", mstring_get_cstr(host_token));
@@ -394,7 +370,7 @@ esp_err_t nvs_token_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-esp_err_t nvs_token_post_handler(httpd_req_t* req)
+esp_err_t settings_cloud_post_handler(httpd_req_t* req)
 {
     char   content[512];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
@@ -411,8 +387,8 @@ esp_err_t nvs_token_post_handler(httpd_req_t* req)
     content[ret] = '\0';
 
     // Parse URL-encoded form data
-    char host_token_str[32] = {0};
-    char token_str[32]      = {0};
+    char host_token_str[64] = {0};
+    char token_str[64]      = {0};
 
     mstring_t* token      = mstring_alloc();
     mstring_t* host_token = mstring_alloc();
@@ -434,7 +410,8 @@ esp_err_t nvs_token_post_handler(httpd_req_t* req)
     {
         mstring_set(token, "");
     }
-    nvs_config_set_token(host_token, token);
+    nvs_config_set_cloud_host(host_token);
+    nvs_config_set_cloud_token(token);
     httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
     ESP_LOGI(TAG, "Token updated: %s", token_str);
     mstring_free(host_token);

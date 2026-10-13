@@ -1,19 +1,30 @@
+* {
+    box-sizing: border-box;
+}
+
 :root {
-    --accent: #4CAF50;
-    --accent-hover: #45a049;
-    --accent-bg: #f0f8f0;
-    --border-color: #ddd;
+    --card: #16213e;
+    --accent: #e94560;
+    --fill: #0f3460;
+    --border: #444;
+    --muted: #aaa;
+    --text: #eee;
     --transition: all 0.3s ease;
-    --radius-sm: 5px;
-    --radius-lg: 10px;
 }
 
 body {
-    font-family: Arial, sans-serif;
-    max-width: 800px;
-    margin: 50px auto;
-    padding: 20px;
-    position: relative;
+    margin: 0 auto;
+    min-height: 100vh;
+    max-width: 860px;
+    padding: 1.5rem;
+    background: #1a1a2e;
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+}
+
+h1 {
+    margin: 0 0 1.5rem;
+    font-size: 2rem;
 }
 
 .reboot-btn {
@@ -22,13 +33,15 @@ body {
     right: 15px;
     width: 50px;
     height: 50px;
+    padding: 0;
     border-radius: 50%;
-    background-color: #ff6b6b;
-    color: white;
-    border: 2px solid #ee5555;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid #c73a52;
     font-size: 24px;
+    line-height: 1;
     cursor: pointer;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
     transition: var(--transition);
     display: flex;
     align-items: center;
@@ -37,9 +50,10 @@ body {
 }
 
 .reboot-btn:hover {
-    background-color: #ee5555;
+    background: #d63752;
+    border-color: var(--accent);
     transform: scale(1.1) rotate(180deg);
-    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.5);
 }
 
 .reboot-btn:active {
@@ -47,75 +61,118 @@ body {
 }
 
 .reboot-btn:disabled {
-    background-color: #ccc;
-    border-color: #aaa;
-    cursor: not-allowed;
+    opacity: 0.5;
     transform: none;
+    cursor: default;
 }
 
-h1 {
-    color: #333;
+/* Tabs */
+.tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Tab panels drawn as cards */
+.upload-form,
+.settings-form {
+    margin-bottom: 1.5rem;
+    padding: 1.5rem 2rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
 }
 
 .upload-form {
-    border: 2px dashed #ccc;
-    padding: 30px;
-    border-radius: var(--radius-lg);
     text-align: center;
     transition: var(--transition);
 }
 
-.upload-form.drag-over,
-.drop-zone.drag-over {
+.settings-form h2 {
+    margin: 0 0 1rem;
+    font-size: 1.25rem;
+}
+
+/* Inputs */
+input[type='text'],
+input[type='password'],
+input[type='number'] {
+    padding: 0.5rem 0.75rem;
+    background: var(--fill);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+input[type='text']::placeholder,
+input[type='password']::placeholder,
+input[type='number']::placeholder {
+    color: var(--muted);
+}
+
+input[type='text']:focus,
+input[type='password']:focus,
+input[type='number']:focus {
+    outline: none;
+    border-color: #888;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+    accent-color: var(--accent);
+}
+
+.drop-zone {
+    padding: 40px 20px;
+    margin: 0 0 20px;
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    background: var(--fill);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.drop-zone:hover {
+    border-color: #888;
+}
+
+.drop-zone.drag-over,
+.upload-form.drag-over {
     border-color: var(--accent);
-    background-color: var(--accent-bg);
+    background: rgba(233, 69, 96, 0.1);
 }
 
 .upload-form.drag-over {
     transform: scale(1.02);
 }
 
-.drop-zone {
-    padding: 40px;
-    margin: 20px 0;
-    border: 2px dashed #ccc;
-    border-radius: var(--radius-lg);
-    background-color: #fafafa;
-    cursor: pointer;
-    transition: var(--transition);
-}
-
-.drop-zone:hover {
-    border-color: #999;
-    background-color: #f5f5f5;
-}
-
-.drop-zone.drag-over {
-    border-width: 3px;
-}
-
 .drop-zone-text {
     font-size: 18px;
-    color: #666;
     margin: 10px 0;
 }
 
 .drop-zone-hint {
     font-size: 14px;
-    color: #999;
+    color: var(--muted);
 }
 
 .file-info {
     margin: 15px 0;
     padding: 10px;
-    background-color: #f0f0f0;
-    border-radius: var(--radius-sm);
+    background: var(--fill);
+    border-radius: 6px;
     font-size: 14px;
-    color: #333;
-}
-
-input[type='file'] {
-    margin: 20px 0;
 }
 
 .addr-input {
@@ -123,16 +180,15 @@ input[type='file'] {
 }
 
 .addr-input input {
-    padding: 8px;
+    width: 216px;
     font-family: monospace;
-    width: 200px;
 }
 
 .length-row {
     display: flex;
     gap: 8px;
-    width: 216px; /* = outer width of baseAddr input: 200px + 2x8px padding */
-    margin: 0 auto; /* center the row so its edges line up with baseAddr */
+    width: 216px; /* matches outer width of the address inputs */
+    margin: 0 auto;
 }
 
 .length-row input {
@@ -155,7 +211,7 @@ input[type='file'] {
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    font-size: 15px;
+    font-size: 0.95rem;
 }
 
 .pin-grid {
@@ -169,78 +225,103 @@ input[type='file'] {
 }
 
 button {
-    background-color: var(--accent);
-    color: white;
-    padding: 12px 30px;
-    border: none;
-    border-radius: var(--radius-sm);
+    padding: 0.5rem 1.25rem;
+    background: var(--fill);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
     cursor: pointer;
-    font-size: 16px;
     transition: var(--transition);
 }
 
 button:hover {
-    background-color: var(--accent-hover);
+    background: #12386b;
+    border-color: #888;
+}
+
+button:active {
+    transform: scale(0.97);
 }
 
 button:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
+    opacity: 0.5;
+    cursor: default;
 }
 
+.tab-button {
+    background: transparent;
+    color: var(--muted);
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+}
+
+.tab-button:hover {
+    background: transparent;
+    color: var(--text);
+    border-bottom-color: transparent;
+}
+
+.tab-button:active {
+    transform: none;
+}
+
+.tab-button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* Status messages */
 #status,
 #settingsStatus,
 #pinsStatus,
 #networksStatus {
     margin-top: 20px;
-    padding: 10px;
-    border-radius: var(--radius-sm);
+    min-height: 1.2em;
+    font-size: 0.95rem;
 }
 
 #settingsStatus {
     text-align: center;
 }
 
-.success,
-.badge-auto {
-    background-color: #d4edda;
-    color: #155724;
-    border: 1px solid #c3e6cb;
+.success {
+    color: #2ecc71;
+    font-weight: bold;
 }
 
 .error {
-    background-color: #f8d7da;
-    color: #721c24;
-    border: 1px solid #f5c6cb;
+    color: var(--accent);
+    font-weight: bold;
 }
 
 .info {
-    background-color: #d1ecf1;
-    color: #0c5460;
-    border: 1px solid #bee5eb;
+    color: var(--muted);
 }
 
 .progress {
     width: 100%;
     height: 20px;
-    background-color: #f3f3f3;
-    border-radius: var(--radius-lg);
     margin-top: 10px;
+    background: var(--fill);
+    border-radius: 10px;
     overflow: hidden;
 }
 
 .progress-bar {
     height: 100%;
-    background-color: var(--accent);
+    background: var(--accent);
     transition: width 0.3s;
 }
 
 .advanced-settings {
     margin: 20px 0;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
     padding: 10px;
-    background-color: #f9f9f9;
+    background: var(--fill);
+    border: 1px solid var(--border);
+    border-radius: 8px;
 }
 
 .advanced-settings summary {
@@ -248,11 +329,11 @@ button:disabled {
     font-weight: bold;
     padding: 5px;
     user-select: none;
-    color: #666;
+    color: var(--muted);
 }
 
 .advanced-settings summary:hover {
-    color: #333;
+    color: var(--text);
 }
 
 .advanced-settings[open] summary {
@@ -264,60 +345,7 @@ button:disabled {
     padding: 10px 5px;
 }
 
-/* Tabs */
-.tabs {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    border-bottom: 2px solid var(--border-color);
-}
-
-.tab-button {
-    background-color: transparent;
-    color: #666;
-    padding: 12px 24px;
-    border: none;
-    border-bottom: 3px solid transparent;
-    cursor: pointer;
-    font-size: 16px;
-    transition: var(--transition);
-    border-radius: 0;
-}
-
-.tab-button:hover {
-    background-color: #f5f5f5;
-    color: #333;
-}
-
-.tab-button.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-    background-color: transparent;
-}
-
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-/* Settings Form */
-.settings-form {
-    margin-top: 24px;
-    border: 2px solid var(--border-color);
-    padding: 30px;
-    border-radius: var(--radius-lg);
-    background-color: #fafafa;
-}
-
-.settings-form h2 {
-    margin-top: 0;
-    color: #333;
-    text-align: center;
-}
-
+/* Settings form */
 .form-group {
     margin-bottom: 20px;
 }
@@ -327,23 +355,12 @@ button:disabled {
 .form-group label {
     display: block;
     margin-bottom: 8px;
-    font-weight: bold;
-    color: #555;
+    color: var(--muted);
+    font-size: 0.9rem;
 }
 
 .form-group input {
     width: 100%;
-    padding: 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    font-size: 14px;
-    box-sizing: border-box;
-}
-
-.form-group input:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
 }
 
 #saveSettingsBtn,
@@ -355,11 +372,11 @@ button:disabled {
 
 /* Network cards */
 .network-card {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
     padding: 12px 16px;
     margin-bottom: 10px;
-    background: #fff;
+    background: var(--fill);
+    border: 1px solid var(--border);
+    border-radius: 8px;
 }
 
 .network-info {
@@ -370,24 +387,27 @@ button:disabled {
 }
 
 .network-ssid {
+    flex: 1;
     font-size: 16px;
     font-weight: bold;
-    color: #333;
-    flex: 1;
 }
 
 .badge {
-    font-size: 12px;
     padding: 2px 8px;
+    border: 1px solid transparent;
     border-radius: 12px;
-    font-weight: normal;
+    font-size: 12px;
     white-space: nowrap;
 }
 
+.badge-auto {
+    color: #2ecc71;
+    border-color: rgba(46, 204, 113, 0.4);
+}
+
 .badge-manual {
-    background-color: #e2e3e5;
-    color: #383d41;
-    border: 1px solid #d6d8db;
+    color: var(--muted);
+    border-color: var(--border);
 }
 
 .network-actions {
@@ -396,33 +416,36 @@ button:disabled {
 }
 
 .btn-small {
-    padding: 5px 14px;
-    font-size: 13px;
-    border-radius: var(--radius-sm);
+    padding: 0.25rem 0.9rem;
+    font-size: 0.8rem;
 }
 
-.btn-edit {
-    background-color: #007bff;
-}
-
-.btn-edit:hover {
-    background-color: #0056b3;
-}
-
+/* Compact destructive action */
 .btn-delete {
-    background-color: #dc3545;
+    background: transparent;
+    color: var(--muted);
+    padding: 0.15rem 0.6rem;
+    line-height: 1.2;
 }
 
 .btn-delete:hover {
-    background-color: #bd2130;
+    background: var(--fill);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn-delete:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 .btn-secondary {
-    background-color: #6c757d;
+    background: transparent;
+    color: var(--muted);
 }
 
 .btn-secondary:hover {
-    background-color: #545b62;
+    color: var(--text);
 }
 
 .btn-row {
@@ -439,7 +462,7 @@ button:disabled {
 .network-edit-form {
     margin-top: 16px;
     padding-top: 16px;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
 }
 
 .network-edit-form h3 {
@@ -454,7 +477,6 @@ button:disabled {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: normal;
     cursor: pointer;
 }
 
@@ -471,24 +493,23 @@ button:disabled {
     flex-direction: column;
     gap: 10px;
     z-index: 9999;
-  }
+}
 
-  .toast {
+.toast {
+    padding: 14px 20px;
     background: var(--accent);
     color: var(--text);
-    padding: 14px 20px;
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     font-size: 14px;
     min-width: 250px;
     max-width: 350px;
-
     opacity: 0;
     transform: translateX(100%);
     transition: opacity 0.3s ease, transform 0.3s ease;
-  }
+}
 
-  .toast.show {
+.toast.show {
     opacity: 1;
     transform: translateX(0);
-  }
+}

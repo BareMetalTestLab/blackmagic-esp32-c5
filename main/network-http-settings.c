@@ -2,6 +2,7 @@
 #include <esp_http_server.h>
 #include "esp_err.h"
 #include "m-string.h"
+#include "network-http.h"
 #include "nvs-config.h"
 #include "platform.h"
 
@@ -10,13 +11,13 @@
 /* NVS settings GET handler */
 esp_err_t settings_mdns_get_handler(httpd_req_t* req)
 {
-    mstring_t* name = mstring_alloc();
-    nvs_config_get_mdns_name(name);
+    mstring_t* mdns_name = mstring_alloc();
+    nvs_config_get_mdns_name(mdns_name);
 
     char resp[128];
-    snprintf(resp, sizeof(resp), "{\"hostname\":\"%s\"}", mstring_get_cstr(name));
+    snprintf(resp, sizeof(resp), "{\"mdns_name\":\"%s\"}", mstring_get_cstr(mdns_name));
 
-    mstring_free(name);
+    mstring_free(mdns_name);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
@@ -42,32 +43,21 @@ esp_err_t settings_mdns_post_handler(httpd_req_t* req)
     content[ret] = '\0';
 
     // Parse URL-encoded form data
-    char hostname_str[64] = {0};
+    char mdns_name_str[64] = {0};
 
-    bool       has_updates = false;
-    mstring_t* hostname    = mstring_alloc();
-
-    if (httpd_query_key_value(content, "hostname", hostname_str, sizeof(hostname_str)) == ESP_OK)
+    if (httpd_query_key_value(content, "mdns_name", mdns_name_str, sizeof(mdns_name_str)) != ESP_OK)
     {
-        mstring_set(hostname, hostname_str);
-        nvs_config_set_mdns_name(hostname);
-        has_updates = true;
-        ESP_LOGI(TAG, "Hostname updated: %s", hostname_str);
-    }
-
-    mstring_free(hostname);
-
-    httpd_resp_set_type(req, "application/json");
-    if (has_updates)
-    {
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
-    }
-    else
-    {
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"No valid parameters\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad mDNS name");
         return ESP_FAIL;
     }
+
+    mstring_t* mdns_name = mstring_alloc_set(mdns_name_str);
+    nvs_config_set_mdns_name(mdns_name);
+    mstring_free(mdns_name);
+
+    httpd_resp_no_content(req);
+    ESP_LOGI(TAG, "mDNS name updated: %s", mdns_name_str);
+    return ESP_OK;
 }
 
 /* GET /settings/pins */
@@ -134,8 +124,7 @@ esp_err_t settings_pins_post_handler(httpd_req_t* req)
              (long) g_pin_tdo_swo,
              (long) g_pin_trst);
 
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_no_content(req);
     return ESP_OK;
 }
 
@@ -219,8 +208,7 @@ esp_err_t settings_networks_post_handler(httpd_req_t* req)
 
     if (httpd_query_key_value(content, "ssid", ssid_str, sizeof(ssid_str)) != ESP_OK || ssid_str[0] == '\0')
     {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Missing SSID\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
         return ESP_FAIL;
     }
     httpd_query_key_value(content, "pass", pass_str, sizeof(pass_str));
@@ -235,20 +223,19 @@ esp_err_t settings_networks_post_handler(httpd_req_t* req)
 
     esp_err_t err = nvs_config_add_network(&net);
 
-    httpd_resp_set_type(req, "application/json");
     if (err == ESP_OK)
     {
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_no_content(req);
         return ESP_OK;
     }
     else if (err == ESP_ERR_NO_MEM)
     {
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Maximum networks reached\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Maximum networks reached");
         return ESP_FAIL;
     }
     else
     {
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Failed to save\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save network");
         return ESP_FAIL;
     }
 }
@@ -270,8 +257,7 @@ esp_err_t settings_networks_patch_handler(httpd_req_t* req)
     char idx_str[8] = {0};
     if (httpd_query_key_value(content, "idx", idx_str, sizeof(idx_str)) != ESP_OK)
     {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Missing index\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
         return ESP_FAIL;
     }
 
@@ -280,8 +266,7 @@ esp_err_t settings_networks_patch_handler(httpd_req_t* req)
     nvs_config_get_networks_count(&count);
     if (idx < 0 || idx >= count)
     {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid index\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
         return ESP_FAIL;
     }
 
@@ -311,8 +296,7 @@ esp_err_t settings_networks_patch_handler(httpd_req_t* req)
 
     nvs_config_set_network(idx, &net);
 
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_no_content(req);
     return ESP_OK;
 }
 
@@ -333,36 +317,41 @@ esp_err_t settings_networks_delete_handler(httpd_req_t* req)
     char idx_str[8] = {0};
     if (httpd_query_key_value(content, "idx", idx_str, sizeof(idx_str)) != ESP_OK)
     {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Missing index\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing index");
         return ESP_FAIL;
     }
 
     int32_t   idx = (int32_t) atoi(idx_str);
     esp_err_t err = nvs_config_delete_network(idx);
 
-    httpd_resp_set_type(req, "application/json");
     if (err == ESP_OK)
     {
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_no_content(req);
         return ESP_OK;
     }
     else
     {
-        httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid index\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid index");
         return ESP_FAIL;
     }
 }
 
 esp_err_t settings_cloud_get_handler(httpd_req_t* req)
 {
-    mstring_t* host_token = mstring_alloc();
-    nvs_config_get_cloud_host(host_token);
+    mstring_t* cloud_host  = mstring_alloc();
+    mstring_t* cloud_token = mstring_alloc();
+    nvs_config_get_cloud_host(cloud_host);
+    // nvs_config_get_cloud_token(cloud_token);
 
-    char resp[128];
-    snprintf(resp, sizeof(resp), "{\"host_token\":\"%s\"}", mstring_get_cstr(host_token));
+    char resp[192];
+    snprintf(resp,
+             sizeof(resp),
+             "{\"cloud_host\":\"%s\",\"cloud_token\":\"%s\"}",
+             mstring_get_cstr(cloud_host),
+             mstring_get_cstr(cloud_token));
 
-    mstring_free(host_token);
+    mstring_free(cloud_host);
+    mstring_free(cloud_token);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
@@ -387,34 +376,24 @@ esp_err_t settings_cloud_post_handler(httpd_req_t* req)
     content[ret] = '\0';
 
     // Parse URL-encoded form data
-    char host_token_str[64] = {0};
-    char token_str[64]      = {0};
+    char cloud_host_str[64]  = {0};
+    char cloud_token_str[64] = {0};
 
-    mstring_t* token      = mstring_alloc();
-    mstring_t* host_token = mstring_alloc();
+    if ((httpd_query_key_value(content, "cloud_host", cloud_host_str, sizeof(cloud_host_str)) != ESP_OK) ||
+        (httpd_query_key_value(content, "cloud_token", cloud_token_str, sizeof(cloud_token_str)) != ESP_OK))
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, NULL);
+        return ESP_FAIL;
+    }
 
-    httpd_resp_set_type(req, "application/json");
-    if (httpd_query_key_value(content, "host_token", host_token_str, sizeof(host_token_str)) == ESP_OK)
-    {
-        mstring_set(host_token, host_token_str);
-    }
-    else
-    {
-        mstring_set(host_token, "https://paulfirs.com");
-    }
-    if (httpd_query_key_value(content, "token", token_str, sizeof(token_str)) == ESP_OK)
-    {
-        mstring_set(token, token_str);
-    }
-    else
-    {
-        mstring_set(token, "");
-    }
-    nvs_config_set_cloud_host(host_token);
-    nvs_config_set_cloud_token(token);
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-    ESP_LOGI(TAG, "Token updated: %s", token_str);
-    mstring_free(host_token);
-    mstring_free(token);
+    mstring_t* cloud_host  = mstring_alloc_set(cloud_host_str);
+    mstring_t* cloud_token = mstring_alloc_set(cloud_token_str);
+    nvs_config_set_cloud_host(cloud_host);
+    nvs_config_set_cloud_token(cloud_token);
+    mstring_free(cloud_host);
+    mstring_free(cloud_token);
+    ESP_LOGI(TAG, "Cloud token updated: %s", cloud_token_str);
+
+    httpd_resp_no_content(req);
     return ESP_OK;
 }

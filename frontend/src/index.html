@@ -20,7 +20,7 @@
         <button class="tab-button active" data-tab="flash">📥 Flash Firmware</button>
         <button class="tab-button" data-tab="networks">📶 Network Settings</button>
         <button class="tab-button" data-tab="settings">⚙️ Hardware Settings</button>
-        <button class="tab-button" data-tab="token">🔑 Token Settings</button>
+        <button class="tab-button" data-tab="cloud">🔑 Cloud Settings</button>
     </div>
 
     <!-- Flash Tab Content -->
@@ -87,8 +87,8 @@
             <h2>Server Configuration</h2>
             <form id='settingsForm'>
                 <div class='form-group'>
-                    <label for='hostname'>Hostname:</label>
-                    <input type='text' id='hostname' name='hostname' placeholder='Enter hostname'>
+                    <label for='mdnsName'>Hostname:</label>
+                    <input type='text' id='mdnsName' name='mdnsName' placeholder='Enter hostname'>
                 </div>
 
                 <button type='submit' id='saveSettingsBtn'>Save Hostname</button>
@@ -160,20 +160,20 @@
             <div id='pinsStatus'></div>
         </div>
     </div>
-    <div class="tab-content" id="token-tab">
+    <div class="tab-content" id="cloud-tab">
         <div class='settings-form'>
-            <h2>Token</h2>
-            <form id='settingsForm'>
+            <h2>Cloud</h2>
+            <form id='cloudForm'>
                 <div class='form-group'>
-                    <label for='token'>Host:</label>
-                    <input type='text' id='host_token' name='host_token' placeholder='Enter host'>
-                    <label for='token'>Token:</label>
-                    <input type='text' id='token' name='token' placeholder='Enter token'>
+                    <label for='cloudHost'>Host:</label>
+                    <input type='text' id='cloudHost' name='cloud_host' placeholder='Enter host'>
+                    <label for='cloudToken'>Token:</label>
+                    <input type='text' id='cloudToken' name='cloud_token' placeholder='Enter token'>
                 </div>
 
-                <button type='submit' id='saveTokenBtn'>Save Token</button>
+                <button type='submit' id='saveCloudBtn'>Save Cloud Settings</button>
             </form>
-            <div id='settingsStatus'></div>
+            <div id='cloudStatus'></div>
         </div>
     </div>
     <script src="app.js"></script>

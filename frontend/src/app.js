@@ -428,11 +428,12 @@ tabButtons.forEach(button => {
 // Settings form functionality
 const settingsForm = document.getElementById('settingsForm');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
-const saveTokenBtn = document.getElementById('saveTokenBtn');
 const settingsStatus = document.getElementById('settingsStatus');
+const saveCloudBtn = document.getElementById('saveCloudBtn');
+const cloudStatus = document.getElementById('cloudStatus');
 
 // Load current settings function
-async function loadSettings() {
+async function loadSettingsMDNs() {
     settingsStatus.textContent = '';
     settingsStatus.className = '';
 
@@ -445,7 +446,7 @@ async function loadSettings() {
 
         const data = await response.json();
 
-        document.getElementById('hostname').value = data.hostname || ''
+        document.getElementById('mdnsName').value = data.mdns_name || ''
 
         settingsStatus.textContent = '';
         settingsStatus.className = '';
@@ -460,7 +461,7 @@ async function loadSettings() {
 settingsForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const hostname = document.getElementById('hostname').value;
+    const mdnsName = document.getElementById('mdnsName').value;
 
     settingsStatus.textContent = 'Saving settings...';
     settingsStatus.className = 'info';
@@ -468,7 +469,7 @@ settingsForm.addEventListener('submit', async (e) => {
 
     try {
         const params = new URLSearchParams();
-        if (hostname) params.append('hostname', hostname);
+        if (mdnsName) params.append('mdns_name', mdnsName);
 
         const response = await fetch('/settings/mdns', {
             method: 'POST',
@@ -482,20 +483,13 @@ settingsForm.addEventListener('submit', async (e) => {
             throw new Error('Failed to save settings');
         }
 
-        const result = await response.json();
+        settingsStatus.textContent = '✓ Settings saved successfully! Restart device to apply changes.';
+        settingsStatus.className = 'success';
 
-        if (result.success) {
-            settingsStatus.textContent = '✓ Settings saved successfully! Restart device to apply changes.';
-            settingsStatus.className = 'success';
-
-            // Reload settings to verify
-            setTimeout(() => {
-                loadSettings();
-            }, 2000);
-        } else {
-            settingsStatus.textContent = '✗ ' + (result.error || 'Failed to save settings');
-            settingsStatus.className = 'error';
-        }
+        // Reload settings to verify
+        setTimeout(() => {
+            loadSettingsMDNs();
+        }, 2000);
 
     } catch (error) {
         settingsStatus.textContent = '✗ Error saving settings: ' + error.message;
@@ -505,15 +499,16 @@ settingsForm.addEventListener('submit', async (e) => {
     }
 });
 
-async function loadToken() {
+async function loadCloud() {
     try {
         const response = await fetch('/settings/cloud');
-        if (!response.ok) throw new Error('Failed to load pins');
+        if (!response.ok) throw new Error('Failed to load cloud settings');
         const data = await response.json();
 
-        document.getElementById('host_token').value = data.host_token;
+        document.getElementById('cloudHost').value = data.cloud_host;
+        document.getElementById('cloudToken').value = data.cloud_token;
     } catch (error) {
-        console.error('Error loading host token:', error);
+        console.error('Error loading cloud settings:', error);
     }
 }
 
@@ -521,14 +516,14 @@ async function loadToken() {
 tabButtons.forEach(button => {
     button.addEventListener('click', () => {
         if (button.getAttribute('data-tab') === 'settings') {
-            loadSettings();
+            loadSettingsMDNs();
             loadPins();
         }
         if (button.getAttribute('data-tab') === 'networks') {
             loadNetworks();
         }
-        if (button.getAttribute('data-tab') === 'token') {
-            loadToken();
+        if (button.getAttribute('data-tab') === 'cloud') {
+            loadCloud();
         }
     });
 });
@@ -581,16 +576,10 @@ async function applyPins(pins, msg, btn) {
         });
 
         if (!response.ok) throw new Error(msg.failed);
-        const result = await response.json();
 
-        if (result.success) {
-            pinsStatus.textContent = '✓ ' + msg.done;
-            pinsStatus.className = 'success';
-            return true;
-        } else {
-            pinsStatus.textContent = '✗ ' + (result.error || msg.failed);
-            pinsStatus.className = 'error';
-        }
+        pinsStatus.textContent = '✓ ' + msg.done;
+        pinsStatus.className = 'success';
+        return true;
     } catch (error) {
         pinsStatus.textContent = '✗ Error: ' + error.message;
         pinsStatus.className = 'error';
@@ -617,15 +606,18 @@ document.getElementById('defaultPinsBtn').addEventListener('click', async () => 
         await loadPins();  // receive the values that were actually set
 });
 
-// Update token
-document.getElementById('saveTokenBtn').addEventListener('click', async () => {
-    const saveTokenBtn = document.getElementById('saveTokenBtn');
-    document.getElementById('saveTokenBtn').disabled = true;
+// Save cloud settings
+document.getElementById('cloudForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    cloudStatus.textContent = 'Saving cloud settings...';
+    cloudStatus.className = 'info';
+    saveCloudBtn.disabled = true;
 
     try {
         const params = new URLSearchParams({
-            host_token: document.getElementById('host_token').value,
-            token: document.getElementById('token').value,
+            cloud_host: document.getElementById('cloudHost').value,
+            cloud_token: document.getElementById('cloudToken').value,
         });
 
         const response = await fetch('/settings/cloud', {
@@ -634,17 +626,16 @@ document.getElementById('saveTokenBtn').addEventListener('click', async () => {
             body: params.toString()
         });
 
-        if (!response.ok) throw new Error('Failed to set token');
-        const result = await response.json();
+        if (!response.ok) throw new Error('Failed to save cloud settings');
 
-        if (!result.success) throw new Error('Failed to set token');
-        setTimeout(() => {
-            showError('Timedout: ' + '/settings/cloud');
-        }, 4000);
+        cloudStatus.textContent = '✓ Cloud settings saved successfully!';
+        cloudStatus.className = 'success';
     } catch (error) {
-        showError(error);
+        cloudStatus.textContent = '✗ Error saving cloud settings: ' + error.message;
+        cloudStatus.className = 'error';
     } finally {
-        document.getElementById('saveTokenBtn').disabled = false;
+        saveCloudBtn.disabled = false;
+        setTimeout(() => { cloudStatus.textContent = ''; cloudStatus.className = ''; }, 4000);
     }
 });
 
@@ -735,13 +726,9 @@ async function updateNetwork(event, idx) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params.toString()
         });
-        const result = await resp.json();
-        if (result.success) {
-            showNetworksStatus('✓ Network updated', 'success');
-            loadNetworks();
-        } else {
-            showNetworksStatus('✗ ' + (result.error || 'Failed to update'), 'error');
-        }
+        if (!resp.ok) throw new Error('Failed to update');
+        showNetworksStatus('✓ Network updated', 'success');
+        loadNetworks();
     } catch (e) {
         showNetworksStatus('✗ Error: ' + e.message, 'error');
     }
@@ -755,13 +742,9 @@ async function deleteNetwork(idx) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'idx=' + idx
         });
-        const result = await resp.json();
-        if (result.success) {
-            showNetworksStatus('✓ Network deleted', 'success');
-            loadNetworks();
-        } else {
-            showNetworksStatus('✗ ' + (result.error || 'Failed to delete'), 'error');
-        }
+        if (!resp.ok) throw new Error('Failed to delete');
+        showNetworksStatus('✓ Network deleted', 'success');
+        loadNetworks();
     } catch (e) {
         showNetworksStatus('✗ Error: ' + e.message, 'error');
     }
@@ -801,16 +784,12 @@ document.getElementById('addNetFormEl').addEventListener('submit', async (e) => 
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params.toString()
         });
-        const result = await resp.json();
-        if (result.success) {
-            showNetworksStatus('✓ Network added', 'success');
-            document.getElementById('addNetworkForm').style.display = 'none';
-            document.getElementById('addNetworkBtn').style.display = 'inline-block';
-            document.getElementById('addNetFormEl').reset();
-            loadNetworks();
-        } else {
-            showNetworksStatus('✗ ' + (result.error || 'Failed to add'), 'error');
-        }
+        if (!resp.ok) throw new Error('Failed to add');
+        showNetworksStatus('✓ Network added', 'success');
+        document.getElementById('addNetworkForm').style.display = 'none';
+        document.getElementById('addNetworkBtn').style.display = 'inline-block';
+        document.getElementById('addNetFormEl').reset();
+        loadNetworks();
     } catch (e) {
         showNetworksStatus('✗ Error: ' + e.message, 'error');
     }

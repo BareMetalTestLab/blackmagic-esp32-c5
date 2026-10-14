@@ -6,11 +6,12 @@
 #include "gdb-glue.h"
 #include "general.h"
 #include "target_internal.h"
+#include "network-bmcloud.h"
 
 #define TAG "network-http-target"
 
-#define FLASH_CHUNK_SIZE 4096       // Write in 4KB chunks for streaming
-#define FLASH_BASE_ADDR 0x08000000  // Default ARM Cortex-M flash base
+#define FLASH_CHUNK_SIZE 4096        // Write in 4KB chunks for streaming
+#define FLASH_BASE_ADDR  0x08000000  // Default ARM Cortex-M flash base
 
 static void region_info(target_s* target)
 {
@@ -139,7 +140,7 @@ static flash_params_t flash_params(httpd_req_t* req)
 }
 
 /* File upload handler with streaming flash */
-esp_err_t upload_post_handler(httpd_req_t* req)
+esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
 {
     uint8_t*    chunk_buffer           = NULL;
     uint8_t*    header_buffer          = NULL;
@@ -169,8 +170,10 @@ esp_err_t upload_post_handler(httpd_req_t* req)
             free(chunk_buffer);
         if (header_buffer)
             free(header_buffer);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
+    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Parse multipart headers to find where binary data starts
     ESP_LOGI(TAG, "Parsing multipart headers...");
@@ -414,17 +417,19 @@ cleanup_early:
     {
         const char* resp = "Firmware flashed successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
 }
 
 /* Flash erase handler */
-esp_err_t erase_post_handler(httpd_req_t* req)
+esp_err_t target_flash_erase_post_handler(httpd_req_t* req)
 {
     target_s*   target    = NULL;
     bool        success   = false;
@@ -432,6 +437,8 @@ esp_err_t erase_post_handler(httpd_req_t* req)
     size_t      erase_len = 0;  // Erase 1 MB from the base address
 
     flash_params_t params = flash_params(req);
+
+    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
@@ -539,17 +546,19 @@ cleanup_early:
     {
         const char* resp = "Flash erased successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
 }
 
 /* Flash read handler */
-esp_err_t read_post_handler(httpd_req_t* req)
+esp_err_t target_flash_read_post_handler(httpd_req_t* req)
 {
     target_s*   target         = NULL;
     bool        success        = false;
@@ -566,6 +575,8 @@ esp_err_t read_post_handler(httpd_req_t* req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Error: Out of memory");
         return ESP_FAIL;
     }
+
+    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
@@ -693,16 +704,19 @@ cleanup_early:
 
     if (success)
     {
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else if (!stream_started)
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
     else
     {
         // Response body already started: the client detects the truncated dump by size
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
 }

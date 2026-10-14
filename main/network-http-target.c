@@ -438,6 +438,8 @@ esp_err_t target_flash_erase_post_handler(httpd_req_t* req)
 
     flash_params_t params = flash_params(req);
 
+    network_bmcloud_set_status(CloudDeviceStateBusy);
+
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
     gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
@@ -544,11 +546,13 @@ cleanup_early:
     {
         const char* resp = "Flash erased successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
 }
@@ -571,6 +575,8 @@ esp_err_t target_flash_read_post_handler(httpd_req_t* req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Error: Out of memory");
         return ESP_FAIL;
     }
+
+    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Enable noack mode and reset the target via GDB packets
     char cmd_reset[] = "$qRcmd,7265736574#37";
@@ -698,16 +704,19 @@ cleanup_early:
 
     if (success)
     {
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else if (!stream_started)
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
     else
     {
         // Response body already started: the client detects the truncated dump by size
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
 }

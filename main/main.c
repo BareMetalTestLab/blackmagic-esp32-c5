@@ -11,6 +11,7 @@
 #include "network-gdb.h"
 #include "network-http.h"
 #include "network-serial.h"
+#include "network-bmcloud.h"
 #ifdef ENABLE_UART_SERIAL
 #    include "uart-serial.h"
 #endif
@@ -33,7 +34,7 @@
 #    include "rtt_if_esp32.h"
 #endif
 
-#define MD_PIN 7
+#define MD_PIN   7
 #define IDLE_PIN 8
 
 void support_gpio_init(void)
@@ -129,6 +130,8 @@ void app_main(void)
     // RTT server on UART1
     uart_rtt_server_init();
 #endif
+    if (network_bmcloud_try_connect((CloudDeviceType[]) {0}))
+        network_bmcloud_set_status(CloudDeviceStateOnline);
     network_http_server_init();
 #ifdef ENABLE_UART_SERIAL
     // Serial bridge UART0 <-> LP UART (replaces the TCP serial server on port 2347)

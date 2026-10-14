@@ -6,11 +6,12 @@
 #include "gdb-glue.h"
 #include "general.h"
 #include "target_internal.h"
+#include "network-bmcloud.h"
 
 #define TAG "network-http-target"
 
-#define FLASH_CHUNK_SIZE 4096       // Write in 4KB chunks for streaming
-#define FLASH_BASE_ADDR 0x08000000  // Default ARM Cortex-M flash base
+#define FLASH_CHUNK_SIZE 4096        // Write in 4KB chunks for streaming
+#define FLASH_BASE_ADDR  0x08000000  // Default ARM Cortex-M flash base
 
 static void region_info(target_s* target)
 {
@@ -169,8 +170,10 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
             free(chunk_buffer);
         if (header_buffer)
             free(header_buffer);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
+    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Parse multipart headers to find where binary data starts
     ESP_LOGI(TAG, "Parsing multipart headers...");
@@ -414,11 +417,13 @@ cleanup_early:
     {
         const char* resp = "Firmware flashed successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
+        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
 }

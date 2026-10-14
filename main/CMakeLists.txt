@@ -6,6 +6,7 @@ idf_component_register(SRCS
     "network-http-system.c"
     "network-http-settings.c"
     "network-http-target.c"
+    "network-bmcloud.c"
     "nvs-config.c"
     "network.c"
     "main.c"
@@ -18,7 +19,7 @@ idf_component_register(SRCS
     "uart-serial.c"
     "nvs.c"
     "nvs-config.c"
-    PRIV_REQUIRES esp_wifi esp_https_server nvs_flash esp_driver_uart esp_driver_gpio esp_driver_usb_serial_jtag
+    PRIV_REQUIRES esp_wifi esp_https_server esp_http_client json nvs_flash esp_driver_uart esp_driver_gpio esp_driver_usb_serial_jtag
     INCLUDE_DIRS "." "${CMAKE_SOURCE_DIR}/frontend/dist")
 
 # Generate frontend header file

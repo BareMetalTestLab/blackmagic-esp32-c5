@@ -3,6 +3,8 @@
 #include "m-string.h"
 #include "nvs-config.h"
 #include <cJSON.h>
+#include <ctype.h>
+#include <esp_crt_bundle.h>
 #include <esp_http_client.h>
 #include <stdint.h>
 #include <string.h>
@@ -11,6 +13,33 @@
 #define TAG "cloud"
 
 #define RESPONSE_BUFFER_SIZE 512
+
+/* Build request URL from the stored host.
+ * Host may be a bare domain, a bare IP or a full URL with scheme:
+ *   paulfirs.com      -> https://paulfirs.com/...
+ *   192.168.1.50      -> http://192.168.1.50/...  (local testing)
+ *   http://192.168.1.50:8080 -> scheme wins
+ */
+static void build_url(char* dst, size_t dst_size, const char* host, const char* path)
+{
+    if (strncmp(host, "http://", 7) == 0 || strncmp(host, "https://", 8) == 0)
+    {
+        snprintf(dst, dst_size, "%s%s", host, path);
+        return;
+    }
+
+    bool is_ip = true;
+    for (const char* p = host; *p != '\0'; p++)
+    {
+        if (!isdigit((unsigned char) *p) && *p != '.' && *p != ':')
+        {
+            is_ip = false;
+            break;
+        }
+    }
+
+    snprintf(dst, dst_size, "%s://%s%s", is_ip ? "http" : "https", host, path);
+}
 
 static CloudDeviceStateType device_state_from_string(const char* state)
 {
@@ -55,12 +84,13 @@ static bool get_me(const char* host, const char* token, CloudDeviceType* device)
 {
     char url[256];
 
-    snprintf(url, sizeof(url), "http://%s/device/me", host);
+    build_url(url, sizeof(url), host, "/device/me");
 
     esp_http_client_config_t config = {
-        .url        = url,
-        .method     = HTTP_METHOD_GET,
-        .timeout_ms = 10000,
+        .url               = url,
+        .method            = HTTP_METHOD_GET,
+        .timeout_ms        = 10000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -127,12 +157,13 @@ static bool get_me(const char* host, const char* token, CloudDeviceType* device)
 static bool send_state(const char* host, const char* token, CloudDeviceStateType state)
 {
     char url[256];
-    snprintf(url, sizeof(url), "http://%s/device/state", host);
+    build_url(url, sizeof(url), host, "/device/state");
 
     esp_http_client_config_t config = {
-        .url        = url,
-        .method     = HTTP_METHOD_POST,
-        .timeout_ms = 10000,
+        .url               = url,
+        .method            = HTTP_METHOD_POST,
+        .timeout_ms        = 10000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);

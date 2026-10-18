@@ -20,6 +20,6 @@ typedef struct
     int64_t              updated_at;
 } CloudDeviceType;
 
-bool network_bmcloud_try_connect(CloudDeviceType *out_device);
-
 void network_bmcloud_set_status(CloudDeviceStateType state);
+
+void network_bmcloud_init(void);

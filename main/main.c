@@ -130,8 +130,7 @@ void app_main(void)
     // RTT server on UART1
     uart_rtt_server_init();
 #endif
-    if (network_bmcloud_try_connect((CloudDeviceType[]) {0}))
-        network_bmcloud_set_status(CloudDeviceStateOnline);
+    network_bmcloud_init();
     network_http_server_init();
 #ifdef ENABLE_UART_SERIAL
     // Serial bridge UART0 <-> LP UART (replaces the TCP serial server on port 2347)

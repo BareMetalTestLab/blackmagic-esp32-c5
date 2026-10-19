@@ -1,24 +1,27 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>BlackMagic - Flash Firmware</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <!-- Reboot Button -->
+    <div id="toast-container" role="alert" aria-live="assertive"></div>
     <button class="reboot-btn" id="rebootBtn" title="Reboot Device">🔄</button>
-    
+
     <h1>BlackMagic Probe</h1>
-    
+
     <!-- Tabs -->
     <div class="tabs">
         <button class="tab-button active" data-tab="flash">📥 Flash Firmware</button>
         <button class="tab-button" data-tab="networks">📶 Network Settings</button>
         <button class="tab-button" data-tab="settings">⚙️ Hardware Settings</button>
     </div>
-    
+
     <!-- Flash Tab Content -->
     <div class="tab-content active" id="flash-tab">
         <div class='upload-form' id='uploadForm'>
@@ -29,7 +32,7 @@
             </div>
             <input type='file' id='fileInput' name='file' accept='.bin,.elf' style='display: none;'>
             <div id='fileInfo' class='file-info' style='display: none;'></div>
-            
+
             <details id='advancedSettings' class='advanced-settings'>
                 <summary>Advanced Settings</summary>
                 <div class='settings-content'>
@@ -40,7 +43,8 @@
                     <div class='addr-input'>
                         <label>Firmware Length (hex or dec):</label>
                         <div class='length-row'>
-                            <input type='text' id='fwLength' value='00000000' maxlength='8' pattern='[0-9A-Fa-f]{8}' placeholder='hex'>
+                            <input type='text' id='fwLength' value='00000000' maxlength='8' pattern='[0-9A-Fa-f]{8}'
+                                placeholder='hex'>
                             <input type='text' id='fwLengthDec' value='0' maxlength='10' placeholder='dec'>
                         </div>
                     </div>
@@ -63,7 +67,7 @@
                     </div>
                 </div>
             </details>
-            
+
             <form id='uploadFormElement' enctype='multipart/form-data'>
                 <button type='submit' id='uploadBtn' disabled>Upload & Flash Target</button>
                 <button type='button' id='eraseBtn'>Erase Flash</button>
@@ -75,17 +79,17 @@
             </div>
         </div>
     </div>
-    
+
     <!-- Networks Tab Content -->
     <div class="tab-content" id="networks-tab">
         <div class='settings-form'>
             <h2>Server Configuration</h2>
             <form id='settingsForm'>
                 <div class='form-group'>
-                    <label for='hostname'>Hostname:</label>
-                    <input type='text' id='hostname' name='hostname' placeholder='Enter hostname'>
+                    <label for='mdnsName'>Hostname:</label>
+                    <input type='text' id='mdnsName' name='mdnsName' placeholder='Enter hostname'>
                 </div>
-                
+
                 <button type='submit' id='saveSettingsBtn'>Save Hostname</button>
             </form>
             <div id='settingsStatus'></div>
@@ -155,7 +159,7 @@
             <div id='pinsStatus'></div>
         </div>
     </div>
-    
     <script src="app.js"></script>
 </body>
+
 </html>

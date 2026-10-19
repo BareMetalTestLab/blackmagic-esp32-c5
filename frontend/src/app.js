@@ -173,7 +173,7 @@ document.getElementById('uploadFormElement').addEventListener('submit', async (e
             uploadBtn.disabled = false;
         });
 
-        xhr.open('POST', '/upload?baseAddr=' + encodeURIComponent(baseAddr) +
+        xhr.open('POST', '/target/flash/upload?baseAddr=' + encodeURIComponent(baseAddr) +
             '&iface=' + encodeURIComponent(iface) + '&length=' + file.size);
         xhr.send(formData);
     } catch (error) {
@@ -303,7 +303,7 @@ document.getElementById('eraseBtn').addEventListener('click', async () => {
             resetProgress();
         });
 
-        xhr.open('POST', '/erase?baseAddr=' + encodeURIComponent(baseAddr) +
+        xhr.open('POST', '/target/flash/erase?baseAddr=' + encodeURIComponent(baseAddr) +
             '&iface=' + encodeURIComponent(iface) + '&length=' + encodeURIComponent(length));
         xhr.send();
     } catch (error) {
@@ -344,7 +344,7 @@ readFlashBtn.addEventListener('click', async () => {
 
     // Step 2: Read flash and download the dump (binary response)
     try {
-        const res = await fetch('/read?baseAddr=' + encodeURIComponent(baseAddr) +
+        const res = await fetch('/target/flash/read?baseAddr=' + encodeURIComponent(baseAddr) +
             '&iface=' + encodeURIComponent(iface) + '&length=' + encodeURIComponent(length), { method: 'POST' });
 
         if (!res.ok) {
@@ -431,12 +431,12 @@ const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 
 // Load current settings function
-async function loadSettings() {
+async function loadSettingsMDNs() {
     settingsStatus.textContent = '';
     settingsStatus.className = '';
 
     try {
-        const response = await fetch('/nvs-settings');
+        const response = await fetch('/settings/mdns');
 
         if (!response.ok) {
             throw new Error('Failed to load settings');
@@ -444,7 +444,7 @@ async function loadSettings() {
 
         const data = await response.json();
 
-        document.getElementById('hostname').value = data.hostname || ''
+        document.getElementById('mdnsName').value = data.mdns_name || ''
 
         settingsStatus.textContent = '';
         settingsStatus.className = '';
@@ -459,7 +459,7 @@ async function loadSettings() {
 settingsForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const hostname = document.getElementById('hostname').value;
+    const mdnsName = document.getElementById('mdnsName').value;
 
     settingsStatus.textContent = 'Saving settings...';
     settingsStatus.className = 'info';
@@ -467,9 +467,9 @@ settingsForm.addEventListener('submit', async (e) => {
 
     try {
         const params = new URLSearchParams();
-        if (hostname) params.append('hostname', hostname);
+        if (mdnsName) params.append('mdns_name', mdnsName);
 
-        const response = await fetch('/nvs-settings', {
+        const response = await fetch('/settings/mdns', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -481,20 +481,13 @@ settingsForm.addEventListener('submit', async (e) => {
             throw new Error('Failed to save settings');
         }
 
-        const result = await response.json();
+        settingsStatus.textContent = '✓ Settings saved successfully! Restart device to apply changes.';
+        settingsStatus.className = 'success';
 
-        if (result.success) {
-            settingsStatus.textContent = '✓ Settings saved successfully! Restart device to apply changes.';
-            settingsStatus.className = 'success';
-
-            // Reload settings to verify
-            setTimeout(() => {
-                loadSettings();
-            }, 2000);
-        } else {
-            settingsStatus.textContent = '✗ ' + (result.error || 'Failed to save settings');
-            settingsStatus.className = 'error';
-        }
+        // Reload settings to verify
+        setTimeout(() => {
+            loadSettingsMDNs();
+        }, 2000);
 
     } catch (error) {
         settingsStatus.textContent = '✗ Error saving settings: ' + error.message;
@@ -508,7 +501,7 @@ settingsForm.addEventListener('submit', async (e) => {
 tabButtons.forEach(button => {
     button.addEventListener('click', () => {
         if (button.getAttribute('data-tab') === 'settings') {
-            loadSettings();
+            loadSettingsMDNs();
             loadPins();
         }
         if (button.getAttribute('data-tab') === 'networks') {
@@ -521,95 +514,78 @@ tabButtons.forEach(button => {
 const pinsForm = document.getElementById('pinsForm');
 const pinsStatus = document.getElementById('pinsStatus');
 
+const PIN_INPUTS = {
+    swdio: 'pinSwdio',
+    swclk: 'pinSwclk',
+    tdi: 'pinTdi',
+    tdo: 'pinTdo',
+    trst: 'pinTrst',
+};
+
+function pinsFromForm() {
+    return Object.fromEntries(
+        Object.entries(PIN_INPUTS).map(([name, id]) => [name, document.getElementById(id).value]));
+}
+
+function pinsToForm(pins) {
+    for (const [name, id] of Object.entries(PIN_INPUTS))
+        document.getElementById(id).value = pins[name];
+}
+
 async function loadPins() {
     try {
-        const response = await fetch('/pins');
+        const response = await fetch('/settings/pins');
         if (!response.ok) throw new Error('Failed to load pins');
-        const data = await response.json();
-
-        document.getElementById('pinSwdio').value = data.swdio;
-        document.getElementById('pinSwclk').value = data.swclk;
-        document.getElementById('pinTdi').value = data.tdi;
-        document.getElementById('pinTdo').value = data.tdo;
-        document.getElementById('pinTrst').value = data.trst;
+        pinsToForm(await response.json());
     } catch (error) {
         console.error('Error loading pins:', error);
     }
 }
 
-pinsForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const savePinsBtn = document.getElementById('savePinsBtn');
-    pinsStatus.textContent = 'Saving pins...';
+// POST pins to the probe; zeros fall back to hardware defaults.
+// msg: {doing, done, failed} status texts. Returns true on success,
+// so the caller can react (e.g. reload the form).
+async function applyPins(pins, msg, btn) {
+    pinsStatus.textContent = msg.doing + '...';
     pinsStatus.className = 'info';
-    savePinsBtn.disabled = true;
+    btn.disabled = true;
 
     try {
-        const params = new URLSearchParams({
-            swdio: document.getElementById('pinSwdio').value,
-            swclk: document.getElementById('pinSwclk').value,
-            tdi: document.getElementById('pinTdi').value,
-            tdo: document.getElementById('pinTdo').value,
-            trst: document.getElementById('pinTrst').value,
-        });
-
-        const response = await fetch('/pins', {
+        const response = await fetch('/settings/pins', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: params.toString()
+            body: new URLSearchParams(pins).toString()
         });
 
-        if (!response.ok) throw new Error('Failed to save pins');
-        const result = await response.json();
+        if (!response.ok) throw new Error(msg.failed);
 
-        if (result.success) {
-            pinsStatus.textContent = '✓ Pins saved successfully!';
-            pinsStatus.className = 'success';
-        } else {
-            pinsStatus.textContent = '✗ ' + (result.error || 'Failed to save pins');
-            pinsStatus.className = 'error';
-        }
+        pinsStatus.textContent = '✓ ' + msg.done;
+        pinsStatus.className = 'success';
+        return true;
     } catch (error) {
         pinsStatus.textContent = '✗ Error: ' + error.message;
         pinsStatus.className = 'error';
     } finally {
-        document.getElementById('savePinsBtn').disabled = false;
+        btn.disabled = false;
         setTimeout(() => { pinsStatus.textContent = ''; pinsStatus.className = ''; }, 4000);
     }
+    return false;
+}
+
+pinsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await applyPins(pinsFromForm(),
+        { doing: 'Saving pins', done: 'Pins saved successfully', failed: 'Failed to save pins' },
+        document.getElementById('savePinsBtn'));
 });
 
-// Reset pins to hardware defaults: send command, then read back the values that were set
+// Reset pins to hardware defaults: send zeros, then read back the values that were set
 document.getElementById('defaultPinsBtn').addEventListener('click', async () => {
-    const defaultPinsBtn = document.getElementById('defaultPinsBtn');
-    pinsStatus.textContent = 'Applying default pins...';
-    pinsStatus.className = 'info';
-    defaultPinsBtn.disabled = true;
-
-    try {
-        // No parameters: the ESP32 applies the defaults hardcoded in firmware
-        const response = await fetch('/pins-default', {
-            method: 'POST'
-        });
-
-        if (!response.ok) throw new Error('Failed to apply default pins');
-        const result = await response.json();
-
-        if (result.success) {
-            await loadPins();  // receive the values that were actually set
-            pinsStatus.textContent = '✓ Default pins applied!';
-            pinsStatus.className = 'success';
-        } else {
-            pinsStatus.textContent = '✗ ' + (result.error || 'Failed to apply default pins');
-            pinsStatus.className = 'error';
-        }
-    } catch (error) {
-        pinsStatus.textContent = '✗ Error: ' + error.message;
-        pinsStatus.className = 'error';
-    } finally {
-        defaultPinsBtn.disabled = false;
-        setTimeout(() => { pinsStatus.textContent = ''; pinsStatus.className = ''; }, 4000);
-    }
+    const zeros = Object.fromEntries(Object.keys(PIN_INPUTS).map(name => [name, 0]));
+    if (await applyPins(zeros,
+            { doing: 'Applying default pins', done: 'Default pins applied', failed: 'Failed to apply default pins' },
+            document.getElementById('defaultPinsBtn')))
+        await loadPins();  // receive the values that were actually set
 });
 
 /* ── Networks ── */
@@ -624,7 +600,7 @@ function escapeAttr(str) {
 
 async function loadNetworks() {
     try {
-        const resp = await fetch('/networks');
+        const resp = await fetch('/settings/networks');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const networks = await resp.json();
         renderNetworks(networks);
@@ -694,18 +670,14 @@ async function updateNetwork(event, idx) {
     if (pass) params.append('pass', pass);
 
     try {
-        const resp = await fetch('/networks/update', {
-            method: 'POST',
+        const resp = await fetch('/settings/networks', {
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params.toString()
         });
-        const result = await resp.json();
-        if (result.success) {
-            showNetworksStatus('✓ Network updated', 'success');
-            loadNetworks();
-        } else {
-            showNetworksStatus('✗ ' + (result.error || 'Failed to update'), 'error');
-        }
+        if (!resp.ok) throw new Error('Failed to update');
+        showNetworksStatus('✓ Network updated', 'success');
+        loadNetworks();
     } catch (e) {
         showNetworksStatus('✗ Error: ' + e.message, 'error');
     }
@@ -714,18 +686,14 @@ async function updateNetwork(event, idx) {
 async function deleteNetwork(idx) {
     if (!confirm('Delete this network?')) return;
     try {
-        const resp = await fetch('/networks/delete', {
-            method: 'POST',
+        const resp = await fetch('/settings/networks', {
+            method: 'DELETE',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'idx=' + idx
         });
-        const result = await resp.json();
-        if (result.success) {
-            showNetworksStatus('✓ Network deleted', 'success');
-            loadNetworks();
-        } else {
-            showNetworksStatus('✗ ' + (result.error || 'Failed to delete'), 'error');
-        }
+        if (!resp.ok) throw new Error('Failed to delete');
+        showNetworksStatus('✓ Network deleted', 'success');
+        loadNetworks();
     } catch (e) {
         showNetworksStatus('✗ Error: ' + e.message, 'error');
     }
@@ -760,21 +728,17 @@ document.getElementById('addNetFormEl').addEventListener('submit', async (e) => 
     });
 
     try {
-        const resp = await fetch('/networks/add', {
+        const resp = await fetch('/settings/networks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params.toString()
         });
-        const result = await resp.json();
-        if (result.success) {
-            showNetworksStatus('✓ Network added', 'success');
-            document.getElementById('addNetworkForm').style.display = 'none';
-            document.getElementById('addNetworkBtn').style.display = 'inline-block';
-            document.getElementById('addNetFormEl').reset();
-            loadNetworks();
-        } else {
-            showNetworksStatus('✗ ' + (result.error || 'Failed to add'), 'error');
-        }
+        if (!resp.ok) throw new Error('Failed to add');
+        showNetworksStatus('✓ Network added', 'success');
+        document.getElementById('addNetworkForm').style.display = 'none';
+        document.getElementById('addNetworkBtn').style.display = 'inline-block';
+        document.getElementById('addNetFormEl').reset();
+        loadNetworks();
     } catch (e) {
         showNetworksStatus('✗ Error: ' + e.message, 'error');
     }
@@ -785,4 +749,20 @@ function showNetworksStatus(msg, cls) {
     el.textContent = msg;
     el.className = cls;
     setTimeout(() => { el.textContent = ''; el.className = ''; }, 4000);
+}
+
+function showError(message, duration = 2000) {
+    const container = document.getElementById('toast-container');
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => toast.classList.add('show'));
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, duration);
 }

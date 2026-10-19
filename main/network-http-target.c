@@ -9,8 +9,8 @@
 
 #define TAG "network-http-target"
 
-#define FLASH_CHUNK_SIZE 4096       // Write in 4KB chunks for streaming
-#define FLASH_BASE_ADDR 0x08000000  // Default ARM Cortex-M flash base
+#define FLASH_CHUNK_SIZE 4096        // Write in 4KB chunks for streaming
+#define FLASH_BASE_ADDR  0x08000000  // Default ARM Cortex-M flash base
 
 static void region_info(target_s* target)
 {
@@ -139,7 +139,7 @@ static flash_params_t flash_params(httpd_req_t* req)
 }
 
 /* File upload handler with streaming flash */
-esp_err_t upload_post_handler(httpd_req_t* req)
+esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
 {
     uint8_t*    chunk_buffer           = NULL;
     uint8_t*    header_buffer          = NULL;
@@ -171,7 +171,6 @@ esp_err_t upload_post_handler(httpd_req_t* req)
             free(header_buffer);
         return ESP_FAIL;
     }
-
     // Step 1: Parse multipart headers to find where binary data starts
     ESP_LOGI(TAG, "Parsing multipart headers...");
     size_t      header_read        = 0;
@@ -424,7 +423,7 @@ cleanup_early:
 }
 
 /* Flash erase handler */
-esp_err_t erase_post_handler(httpd_req_t* req)
+esp_err_t target_flash_erase_post_handler(httpd_req_t* req)
 {
     target_s*   target    = NULL;
     bool        success   = false;
@@ -549,7 +548,7 @@ cleanup_early:
 }
 
 /* Flash read handler */
-esp_err_t read_post_handler(httpd_req_t* req)
+esp_err_t target_flash_read_post_handler(httpd_req_t* req)
 {
     target_s*   target         = NULL;
     bool        success        = false;

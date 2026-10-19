@@ -7,7 +7,7 @@ idf_component_register(SRCS
     "network-http-settings.c"
     "network-http-target.c"
     "network-bmcloud.c"
-    "nvs-config.c"
+    "just_flasher.c"
     "network.c"
     "main.c"
     "network-gdb.c"

@@ -2,8 +2,6 @@
 #include "stdbool.h"
 #include "stdint.h"
 
-#define DEVICE_NAME_MAX 64
-
 typedef enum
 {
     CloudDeviceStateOffline,
@@ -11,14 +9,6 @@ typedef enum
     CloudDeviceStateError,
     CloudDeviceStateBusy,
 } CloudDeviceStateType;
-
-typedef struct
-{
-    int64_t              id;
-    char                 name[DEVICE_NAME_MAX];
-    CloudDeviceStateType state;
-    int64_t              updated_at;
-} CloudDeviceType;
 
 void network_bmcloud_set_status(CloudDeviceStateType state);
 

@@ -1,105 +1,16 @@
 #include <esp_log.h>
 #include <esp_http_server.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
-#include <target.h>
-#include "gdb-glue.h"
+#include "just_flasher.h"
 #include "general.h"
-#include "target_internal.h"
 #include "network-bmcloud.h"
 
 #define TAG "network-http-target"
 
-#define FLASH_CHUNK_SIZE 4096        // Write in 4KB chunks for streaming
-#define FLASH_BASE_ADDR  0x08000000  // Default ARM Cortex-M flash base
-
-static void region_info(target_s* target)
-{
-    target_flash_s* flash = target->flash;
-
-    if (!flash)
-    {
-        ESP_LOGE(TAG, "Target has no flash region");
-        target_detach(target);
-        target = NULL;
-    }
-
-    /* Capture all useful target/flash fields now: they must not be
-     * dereferenced after target_detach() in the cleanup path below. */
-    const char* core_name          = target->core ? target->core : "unknown";
-    const char* driver_name        = target->driver ? target->driver : "unknown";
-    const char* cmdline            = target->cmdline;
-    uint32_t    cpuid              = target->cpuid;
-    uint16_t    designer_code      = target->designer_code;
-    uint16_t    part_id            = target->part_id;
-    bool        attached           = target->attached;
-    size_t      regs_size          = target->regs_size;
-    uint32_t    flash_start        = flash->start;
-    size_t      flash_length       = flash->length;
-    size_t      flash_blocksize    = flash->blocksize;
-    size_t      flash_writesize    = flash->writesize;
-    size_t      flash_writebufsize = flash->writebufsize;
-    uint8_t     flash_erased       = flash->erased;
-    uint8_t     flash_operation    = flash->operation;
-
-    /* The flash regions form a singly-linked list (newest region first).
-     * Copy the whole list into local storage while the target is still
-     * attached: the nodes are owned by the target and must not be
-     * dereferenced after target_detach() in the cleanup path below. */
-#define VERIFY_MAX_FLASH_REGIONS 8
-    size_t          region_count = 0;
-    uint32_t        region_start[VERIFY_MAX_FLASH_REGIONS];
-    size_t          region_length[VERIFY_MAX_FLASH_REGIONS];
-    size_t          region_blocksize[VERIFY_MAX_FLASH_REGIONS];
-    size_t          flash_total = 0;
-    target_flash_s* flash_it    = flash;
-    while (flash_it && region_count < VERIFY_MAX_FLASH_REGIONS)
-    {
-        region_start[region_count]     = flash_it->start;
-        region_length[region_count]    = flash_it->length;
-        region_blocksize[region_count] = flash_it->blocksize;
-        flash_total += flash_it->length;
-        region_count++;
-        flash_it = flash_it->next;
-    }
-    const bool regions_truncated = flash_it != NULL;
-
-    ESP_LOGI(TAG, "Target information: core=%s driver=%s attached=%d", core_name, driver_name, (int) attached);
-    ESP_LOGI(TAG,
-             "Target information: cpuid=%#08lx designer=%#04x part_id=%#04x",
-             (unsigned long) cpuid,
-             (unsigned) designer_code,
-             (unsigned) part_id);
-    ESP_LOGI(TAG, "Target information: regs_size=%zu cmdline=\"%s\"", regs_size, cmdline);
-    ESP_LOGI(TAG,
-             "Flash information: start=%#08lx length=%zu bytes (%zu KiB)",
-             (unsigned long) flash_start,
-             flash_length,
-             flash_length / 1024);
-    ESP_LOGI(TAG,
-             "Flash information: blocksize=%zu writesize=%zu writebufsize=%zu",
-             flash_blocksize,
-             flash_writesize,
-             flash_writebufsize);
-    ESP_LOGI(TAG, "Flash information: erased=%u operation=%u", (unsigned) flash_erased, (unsigned) flash_operation);
-    ESP_LOGI(TAG,
-             "Flash regions: %u region(s), total %zu bytes (%zu KiB)%s",
-             (unsigned) region_count,
-             flash_total,
-             flash_total / 1024,
-             regions_truncated ? " (truncated)" : "");
-    for (size_t i = 0; i < region_count; i++)
-    {
-        ESP_LOGI(TAG,
-                 "Flash region %zu/%u: start=%#08lx length=%zu bytes (%zu KiB) blocksize=%zu",
-                 i + 1,
-                 (unsigned) region_count,
-                 (unsigned long) region_start[i],
-                 region_length[i],
-                 region_length[i] / 1024,
-                 region_blocksize[i]);
-    }
-}
+#define FLASH_CHUNK_SIZE        4096  // Write in 4KB chunks for streaming
+#define FLASHER_LOCK_WAIT_MS    1000  // fail fast when another flash operation is running
 
 /* Helper to find pattern in buffer */
 static int find_pattern(const uint8_t* buffer, size_t buf_len, const char* pattern, size_t pattern_len)
@@ -114,6 +25,14 @@ static int find_pattern(const uint8_t* buffer, size_t buf_len, const char* patte
     return -1;
 }
 
+/* "Error: <flasher message>" for the HTTP response */
+static const char* flasher_web_error(JustFlasherError err)
+{
+    static char buffer[64];
+    snprintf(buffer, sizeof(buffer), "Error: %s", just_flasher_err_str(err));
+    return buffer;
+}
+
 typedef struct
 {
     uint32_t base_addr;
@@ -123,7 +42,7 @@ typedef struct
 
 static flash_params_t flash_params(httpd_req_t* req)
 {
-    flash_params_t params = {.base_addr = 0x08000000, .length = 0, .use_swd = true};
+    flash_params_t params = {.base_addr = FLASHER_DEFAULT_BASE_ADDR, .length = 0, .use_swd = true};
 
     char query[128];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
@@ -144,7 +63,6 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
 {
     uint8_t*    chunk_buffer           = NULL;
     uint8_t*    header_buffer          = NULL;
-    target_s*   target                 = NULL;
     size_t      content_length         = req->content_len;
     size_t      total_received         = 0;
     size_t      total_written          = 0;
@@ -212,7 +130,7 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
         goto cleanup_early;
     }
 
-    ESP_LOGI(TAG, "Using flash base address: 0x%08lX", params.base_addr);
+    ESP_LOGI(TAG, "Using flash base address: 0x%08lX", (unsigned long) params.base_addr);
 
     size_t firmware_size = params.length;
     if (firmware_size == 0)
@@ -228,75 +146,26 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
              content_length,
              data_start_offset);
 
-    // Step 2: Scan for targets
-    ESP_LOGI(TAG, "Scanning for targets...");
-
-    char pkt_enable_noack[] = "$QStartNoAckMode#B0";
-    gdb_glue_receive((uint8_t*) pkt_enable_noack, sizeof(pkt_enable_noack)); /* Enable NoAckMode */
-
-    char cmd_reset[] = "$qRcmd,7265736574#37";
-    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-    extern target_s* target_list;
-    int              try = 5;
-    while (target_list && try-- > 0)
+    // Step 2: Take exclusive ownership of the target and prepare it
+    JustFlasherError err = just_flasher_begin(params.use_swd, FLASHER_LOCK_WAIT_MS);
+    if (err != JustFlasherOk)
     {
-        ESP_LOGI(TAG, "Wait for target to halt...");
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-    }
-
-    bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", params.use_swd ? "SWD" : "JTAG");
-    if (params.use_swd ? adiv5_swd_scan() : jtag_scan())
-    {
-        ESP_LOGI(TAG, "Target found via %s", params.use_swd ? "SWD" : "JTAG");
-        target_found = true;
-    }
-
-    if (!target_found)
-    {
-        ESP_LOGE(TAG, "No target found!");
-        error_msg = "Error: No target device found";
+        ESP_LOGE(TAG, "Failed to start flash operation: %s", just_flasher_err_str(err));
+        error_msg = flasher_web_error(err);
         goto cleanup_early;
     }
 
-    // Step 3: Attach to target
-    target = target_attach_n(1, NULL);
-    if (!target)
+    // Step 3: Erase flash
+    err = just_flasher_erase(params.base_addr, firmware_size);
+    if (err != JustFlasherOk)
     {
-        ESP_LOGE(TAG, "Failed to attach to target");
-        gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-
-        error_msg = "Error: Failed to attach to target";
-        goto cleanup_early;
-    }
-
-    ESP_LOGI(TAG, "Successfully attached to target");
-
-    // Step 4: Halt the target
-    target_halt_request(target);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    target_halt_reason_e halt_reason = target_halt_poll(target, NULL);
-    if (halt_reason == TARGET_HALT_RUNNING || halt_reason == TARGET_HALT_ERROR)
-    {
-        ESP_LOGE(TAG, "Failed to halt target");
-        goto cleanup;
-    }
-
-    ESP_LOGI(TAG, "Target halted");
-
-    // Step 5: Erase flash
-    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", params.base_addr, firmware_size);
-    if (!target_flash_erase(target, params.base_addr, firmware_size))
-    {
-        ESP_LOGE(TAG, "Flash erase failed");
+        error_msg = flasher_web_error(err);
         goto cleanup;
     }
 
     ESP_LOGI(TAG, "Flash erased, starting streaming write...");
 
-    // Step 6: Stream data and write to flash
+    // Step 4: Stream data and write to flash
     // First, handle any binary data already in header_buffer
     size_t chunk_offset     = 0;
     size_t binary_in_header = header_read - data_start_offset;
@@ -340,9 +209,10 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
 
         if (bytes_to_flash >= FLASH_CHUNK_SIZE || (total_written + bytes_to_flash >= target_bytes_to_write))
         {
-            if (!target_flash_write(target, params.base_addr + total_written, chunk_buffer, bytes_to_flash))
+            if (just_flasher_write(params.base_addr + total_written, chunk_buffer, bytes_to_flash) != JustFlasherOk)
             {
                 ESP_LOGE(TAG, "Flash write failed at offset %zu", total_written);
+                error_msg = flasher_web_error(JustFlasherErrWrite);
                 goto cleanup;
             }
 
@@ -385,29 +255,15 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "Streaming write complete: %zu bytes written to target", total_written);
 
-    // Step 6: Complete flash operation
-    if (!target_flash_complete(target))
-    {
-        ESP_LOGW(TAG, "Flash complete operation returned false");
-    }
-
-    // Step 7: Reset target
-    ESP_LOGI(TAG, "Resetting target...");
-    target_reset(target);
-    target_halt_resume(target, false);
+    // Step 5: Flush writes, reset the target and release it
+    just_flasher_end();
 
     success = true;
     ESP_LOGI(TAG, "Flash operation completed successfully!");
 
 cleanup:
-    if (target)
-    {
-        target_detach(target);
-    }
-    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    just_flasher_abort();
 cleanup_early:
-    gdb_glue_receive((uint8_t*) "\x04", 1);  // disable noack
     if (header_buffer)
         free(header_buffer);
     if (chunk_buffer)
@@ -431,117 +287,40 @@ cleanup_early:
 /* Flash erase handler */
 esp_err_t target_flash_erase_post_handler(httpd_req_t* req)
 {
-    target_s*   target    = NULL;
     bool        success   = false;
     const char* error_msg = "Error: Flash operation failed";
-    size_t      erase_len = 0;  // Erase 1 MB from the base address
 
     flash_params_t params = flash_params(req);
 
     network_bmcloud_set_status(CloudDeviceStateBusy);
 
-    // Step 1: Enable noack mode and reset the target via GDB packets
-    char cmd_reset[] = "$qRcmd,7265736574#37";
-    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-
-    extern target_s* target_list;
-    int              try = 5;
-    while (target_list && try-- > 0)
+    // Step 1: Take exclusive ownership of the target and prepare it
+    JustFlasherError err = just_flasher_begin(params.use_swd, FLASHER_LOCK_WAIT_MS);
+    if (err != JustFlasherOk)
     {
-        ESP_LOGI(TAG, "Wait for target to halt...");
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-    }
-
-    // Step 2: Scan for target
-    bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", params.use_swd ? "SWD" : "JTAG");
-    if (params.use_swd ? adiv5_swd_scan() : jtag_scan())
-    {
-        ESP_LOGI(TAG, "Target found via %s", params.use_swd ? "SWD" : "JTAG");
-        target_found = true;
-    }
-
-    if (!target_found)
-    {
-        ESP_LOGE(TAG, "No target found!");
-        error_msg = "Error: No target device found";
+        ESP_LOGE(TAG, "Failed to start erase operation: %s", just_flasher_err_str(err));
+        error_msg = flasher_web_error(err);
         goto cleanup_early;
     }
 
-    // Step 3: Attach to target
-    target = target_attach_n(1, NULL);
-    if (!target)
+    // Step 2: Erase flash, length 0 erases the whole main flash bank
+    err = just_flasher_erase(params.base_addr, params.length);
+    if (err != JustFlasherOk)
     {
-        ESP_LOGE(TAG, "Failed to attach to target");
-        gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-
-        error_msg = "Error: Failed to attach to target";
-        goto cleanup_early;
-    }
-
-    ESP_LOGI(TAG, "Successfully attached to target");
-
-    // Step 4: Halt the target
-    target_halt_request(target);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    target_halt_reason_e halt_reason = target_halt_poll(target, NULL);
-    if (halt_reason == TARGET_HALT_RUNNING || halt_reason == TARGET_HALT_ERROR)
-    {
-        ESP_LOGE(TAG, "Failed to halt target");
-        goto cleanup;
-    }
-
-    ESP_LOGI(TAG, "Target halted");
-    region_info(target);
-
-    // Step 5: Erase flash
-    if (params.length == 0)
-    {
-        target_flash_s* flash_it = target->flash;
-        while (flash_it)
-        {
-            if (flash_it->start & 0x08000000)
-            {
-                erase_len += flash_it->length;
-            }
-            flash_it = flash_it->next;
-        }
-    }
-    else
-    {
-        erase_len = params.length;
-    }
-
-    char read_len_str[12];
-    itoa(erase_len, read_len_str, 10);
-    ESP_LOGI(TAG, "Erasing flash at 0x%08lX, size: %zu bytes", params.base_addr, erase_len);
-    if (!target_flash_erase(target, params.base_addr, erase_len))
-    {
-        ESP_LOGE(TAG, "Flash erase failed");
-        error_msg = "Error: Flash erase failed";
+        error_msg = flasher_web_error(err);
         goto cleanup;
     }
 
     ESP_LOGI(TAG, "Flash erased successfully");
 
-    // Step 6: Reset and resume the target
-    target_reset(target);
-    target_halt_resume(target, false);
+    // Step 3: Reset and resume the target, release it
+    just_flasher_end();
 
     success = true;
 
 cleanup:
-    if (target)
-    {
-        target_detach(target);
-    }
-    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    just_flasher_abort();
 cleanup_early:
-    gdb_glue_receive((uint8_t*) "\x04", 1);  // disable noack
-
     if (success)
     {
         const char* resp = "Flash erased successfully";
@@ -560,10 +339,8 @@ cleanup_early:
 /* Flash read handler */
 esp_err_t target_flash_read_post_handler(httpd_req_t* req)
 {
-    target_s*   target         = NULL;
     bool        success        = false;
     const char* error_msg      = "Error: Flash operation failed";
-    size_t      read_len       = 0;
     uint8_t*    chunk_buffer   = malloc(FLASH_CHUNK_SIZE);
     bool        stream_started = false;
 
@@ -578,80 +355,21 @@ esp_err_t target_flash_read_post_handler(httpd_req_t* req)
 
     network_bmcloud_set_status(CloudDeviceStateBusy);
 
-    // Step 1: Enable noack mode and reset the target via GDB packets
-    char cmd_reset[] = "$qRcmd,7265736574#37";
-    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-
-    extern target_s* target_list;
-    int              try = 5;
-    while (target_list && try-- > 0)
+    // Step 1: Take exclusive ownership of the target and prepare it
+    JustFlasherError err = just_flasher_begin(params.use_swd, FLASHER_LOCK_WAIT_MS);
+    if (err != JustFlasherOk)
     {
-        ESP_LOGI(TAG, "Wait for target to halt...");
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-    }
-
-    // Step 2: Scan for target
-    bool target_found = false;
-    ESP_LOGI(TAG, "Scanning via %s...", params.use_swd ? "SWD" : "JTAG");
-    if (params.use_swd ? adiv5_swd_scan() : jtag_scan())
-    {
-        ESP_LOGI(TAG, "Target found via %s", params.use_swd ? "SWD" : "JTAG");
-        target_found = true;
-    }
-
-    if (!target_found)
-    {
-        ESP_LOGE(TAG, "No target found!");
-        error_msg = "Error: No target device found";
+        ESP_LOGE(TAG, "Failed to start read operation: %s", just_flasher_err_str(err));
+        error_msg = flasher_web_error(err);
         goto cleanup_early;
     }
 
-    // Step 3: Attach to target
-    target = target_attach_n(1, NULL);
-    if (!target)
+    // Step 2: Read length: explicit or the whole main flash bank
+    size_t read_len = params.length;
     {
-        ESP_LOGE(TAG, "Failed to attach to target");
-        gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-
-        error_msg = "Error: Failed to attach to target";
-        goto cleanup_early;
+        read_len = just_flasher_get_flash_size();
     }
-
-    ESP_LOGI(TAG, "Successfully attached to target");
-
-    // Step 4: Halt the target
-    target_halt_request(target);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    target_halt_reason_e halt_reason = target_halt_poll(target, NULL);
-    if (halt_reason == TARGET_HALT_RUNNING || halt_reason == TARGET_HALT_ERROR)
-    {
-        ESP_LOGE(TAG, "Failed to halt target");
-        goto cleanup;
-    }
-
-    ESP_LOGI(TAG, "Target halted");
-    region_info(target);
-
-    // Step 5: Read flash and stream it to the client
-    if (params.length == 0)
-    {
-        target_flash_s* flash_it = target->flash;
-        while (flash_it)
-        {
-            if (flash_it->start & 0x08000000)
-            {
-                read_len += flash_it->length;
-            }
-            flash_it = flash_it->next;
-        }
-    }
-    else
-    {
-        read_len = params.length;
-    }
-    ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", params.base_addr, read_len);
+    ESP_LOGI(TAG, "Reading flash at 0x%08lX, size: %zu bytes", (unsigned long) params.base_addr, read_len);
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"flash_dump.bin\"");
     char read_len_str[12];
@@ -659,13 +377,14 @@ esp_err_t target_flash_read_post_handler(httpd_req_t* req)
     httpd_resp_set_hdr(req, "Content-Length", read_len_str);
     stream_started = true;
 
+    // Step 3: Read flash and stream it to the client
     for (size_t offset = 0; offset < read_len;)
     {
         size_t chunk = MIN(read_len - offset, FLASH_CHUNK_SIZE);
-        if (target_mem32_read(target, chunk_buffer, params.base_addr + offset, chunk))
+        if (just_flasher_read(params.base_addr + offset, chunk_buffer, chunk) != JustFlasherOk)
         {
-            ESP_LOGE(TAG, "Flash read failed at 0x%08lX", params.base_addr + offset);
-            error_msg = "Error: Flash read failed";
+            ESP_LOGE(TAG, "Flash read failed at 0x%08lX", (unsigned long) (params.base_addr + offset));
+            error_msg = flasher_web_error(JustFlasherErrRead);
             httpd_resp_send_chunk(req, NULL, 0);
             goto cleanup;
         }
@@ -684,24 +403,15 @@ esp_err_t target_flash_read_post_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "Flash read successfully");
 
-    // Step 6: Reset and resume the target
-    target_reset(target);
-    target_halt_resume(target, false);
+    // Step 4: Reset and resume the target, release it
+    just_flasher_end();
 
     success = true;
 
 cleanup:
-    if (target)
-    {
-        target_detach(target);
-    }
-    gdb_glue_receive((uint8_t*) cmd_reset, sizeof(cmd_reset));
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    just_flasher_abort();
     free(chunk_buffer);
 cleanup_early:
-    char pkt_disable_noack[] = "\x04";
-    gdb_glue_receive((uint8_t*) pkt_disable_noack, 1);
-
     if (success)
     {
         network_bmcloud_set_status(CloudDeviceStateOnline);

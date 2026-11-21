@@ -1,28 +1,22 @@
 #include "network-bmcloud.h"
 #include "just_flasher.h"
+#include "network-bmcloud-ws.h"
 #include "freertos/idf_additions.h"
 #include "m-string.h"
 #include "nvs-config.h"
-#include <cJSON.h>
 #include <ctype.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
+#include <mbedtls/private/sha256.h>
 #include <stdint.h>
 #include <string.h>
 #include "esp_log.h"
 
 #define TAG "cloud"
 
-#define RESPONSE_BUFFER_SIZE 512
-
-/* Outcome of a cloud request, the polling task picks a retry strategy based on it */
-typedef enum
-{
-    CloudResultOk,            // request succeeded
-    CloudResultNetworkError,  // server unreachable, timeout, connection dropped
-    CloudResultAuthError,     // HTTP 401/403, token rejected
-    CloudResultServerError,   // any other unexpected status or malformed response
-} CloudResultType;
+/* Jobs arrive as pushes on the device websocket (bmcloud-channel frames);
+ * this file runs them: downloads the firmware over REST, flashes it and
+ * reports the outcome back over the websocket. */
 
 /* Build request URL from the stored host.
  * Host may be a bare domain, a bare IP or a full URL with scheme:
@@ -51,202 +45,97 @@ static void build_url(char* dst, size_t dst_size, const char* host, const char* 
     snprintf(dst, dst_size, "%s://%s%s", is_ip ? "http" : "https", host, path);
 }
 
-static CloudResultType send_state(const char* host, const char* token, CloudDeviceStateType state)
-{
-    char url[256];
-    build_url(url, sizeof(url), host, "/device/state");
-
-    esp_http_client_config_t config = {
-        .url               = url,
-        .method            = HTTP_METHOD_POST,
-        .timeout_ms        = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to init HTTP client");
-        return CloudResultNetworkError;
-    }
-
-    char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", token);
-    esp_http_client_set_header(client, "Authorization", auth_header);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-
-    const char* states[] = {
-        [CloudDeviceStateOffline] = "offline",
-        [CloudDeviceStateOnline]  = "online",
-        [CloudDeviceStateError]   = "error",
-        [CloudDeviceStateBusy]    = "busy",
-    };
-
-    char payload[32];
-    int  payload_len = snprintf(payload, sizeof(payload), "{\"state\":\"%s\"}", states[state]);
-
-    CloudResultType result = CloudResultServerError;
-    esp_err_t       err    = esp_http_client_open(client, payload_len);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "HTTP POST /device/state failed: %s", esp_err_to_name(err));
-        result = CloudResultNetworkError;
-    }
-    else if (esp_http_client_write(client, payload, payload_len) == payload_len)
-    {
-        esp_http_client_fetch_headers(client);
-        int status = esp_http_client_get_status_code(client);
-        ESP_LOGI(TAG, "HTTP POST /device/state: status = %d", status);
-        if (status == 204 /* HttpStatus_NoContent is not in IDF's enum */)
-        {
-            result = CloudResultOk;
-        }
-        else if (status == 401 /* Unauthorized */ || status == 403 /* Forbidden */)
-        {
-            result = CloudResultAuthError;
-        }
-    }
-
-    if (result != CloudResultOk)
-    {
-        ESP_LOGE(TAG, "Failed to update device state");
-    }
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return result;
-}
-
-void network_bmcloud_set_status(CloudDeviceStateType state)
-{
-    mstring_t* host  = mstring_alloc();
-    mstring_t* token = mstring_alloc();
-
-    if (nvs_config_get_cloud_host(host) == ESP_OK && nvs_config_get_cloud_token(token) == ESP_OK)
-    {
-        send_state(mstring_get_cstr(host), mstring_get_cstr(token), state);
-    }
-
-    mstring_free(host);
-    mstring_free(token);
-}
-
-/* --- Cloud polling automat --- */
+/* --- Job runner --- */
 
 #define CLOUD_STARTUP_DELAY_MS     (5 * 1000)        // give the network time to come up after boot
-#define CLOUD_POLL_PERIOD_MS       (10 * 1000)       // ping interval while everything is fine
-#define CLOUD_RETRY_MIN_MS         (5 * 1000)        // first retry after a failure
-#define CLOUD_RETRY_MAX_MS         (60 * 1000)       // retry backoff cap
-#define CLOUD_AUTH_RETRY_MS        (30 * 1000)       // re-check rate while the token is rejected
+#define CLOUD_POLL_PERIOD_MS       (500)             // job queue poll while idle
 #define CLOUD_UNCONFIGURED_MS      (10 * 1000)       // re-read NVS while host/token are not set
 #define FIRMWARE_CHUNK_SIZE        (1024)            // download read chunk
 #define FIRMWARE_MAX_ATTEMPTS      (3)               // download retries before reporting a failed job
 #define CLOUD_FLASHER_LOCK_WAIT_MS (10 * 60 * 1000)  // wait out a concurrent web flash before failing the job
 
-typedef struct
+/* The websocket is shared with network_bmcloud_set_status callers */
+static bmcloud_ws_t* s_ws = NULL;
+
+void network_bmcloud_set_status(CloudDeviceStateType state)
 {
-    int64_t job_id;
-    int64_t firmware_id;
-} CloudJobType;
+    // the REST state endpoint is gone: presence state rides the heartbeat now
+    if (s_ws == NULL)
+        return;
 
-/* GET /device/job: claim the oldest pending job, it atomically moves to flashing.
- * Doubles as the connectivity check: 404 means reachable, authenticated,
- * there is just no work to do. */
-static CloudResultType claim_job(const char* host, const char* token, CloudJobType* job, bool* has_job)
+    switch (state)
+    {
+    case CloudDeviceStateBusy:
+        bmcloud_ws_set_state(s_ws, BmChannelStateBusy);
+        break;
+    case CloudDeviceStateError:
+        bmcloud_ws_set_state(s_ws, BmChannelStateError);
+        break;
+    case CloudDeviceStateOnline:
+        bmcloud_ws_set_state(s_ws, BmChannelStateOnline);
+        break;
+    case CloudDeviceStateOffline:
+    default:
+        // offline is the server's conclusion from silence, not something we report
+        break;
+    }
+}
+
+/* Verify what actually landed in the target flash: the download is streamed
+ * straight into the target, so read the image back and hash it against the
+ * digest pushed with the job. Catches both a corrupted download and a bad
+ * write. On failure *error points to the reason. */
+static bool verify_flash_digest(const BmChannelJobType* job, size_t written, char* buffer, size_t buffer_size, const char** error)
 {
-    *has_job = false;
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);
 
-    char url[256];
-    build_url(url, sizeof(url), host, "/device/job");
-
-    esp_http_client_config_t config = {
-        .url               = url,
-        .method            = HTTP_METHOD_GET,
-        .timeout_ms        = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL)
+    bool ok = true;
+    for (size_t off = 0; off < written && ok; )
     {
-        ESP_LOGE(TAG, "Failed to init HTTP client");
-        return CloudResultNetworkError;
-    }
-
-    char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", token);
-    esp_http_client_set_header(client, "Authorization", auth_header);
-
-    CloudResultType result = CloudResultServerError;
-    char            buffer[RESPONSE_BUFFER_SIZE];
-
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "HTTP GET /device/job failed: %s", esp_err_to_name(err));
-        result = CloudResultNetworkError;
-    }
-    else
-    {
-        int content_length = esp_http_client_fetch_headers(client);
-        int status         = esp_http_client_get_status_code(client);
-
-        if (status == 401 /* Unauthorized */ || status == 403 /* Forbidden */)
-        {
-            result = CloudResultAuthError;
-        }
-        else if (status == 404 /* No pending jobs */)
-        {
-            ESP_LOGD(TAG, "No pending jobs");
-            result = CloudResultOk;
-        }
-        else if (status == HttpStatus_Ok && content_length >= 0 && content_length < (int) sizeof(buffer))
-        {
-            int total_read = 0;
-            while (total_read < content_length)
-            {
-                int data_read = esp_http_client_read(client, buffer + total_read, content_length - total_read);
-                if (data_read <= 0)
-                    break;
-                total_read += data_read;
-            }
-            buffer[total_read] = '\0';
-
-            cJSON*       root        = cJSON_Parse(buffer);
-            const cJSON* job_id      = cJSON_GetObjectItem(root, "job_id");
-            const cJSON* firmware_id = cJSON_GetObjectItem(root, "firmware_id");
-            if (total_read == content_length && cJSON_IsNumber(job_id) && cJSON_IsNumber(firmware_id))
-            {
-                job->job_id      = (int64_t) job_id->valuedouble;
-                job->firmware_id = (int64_t) firmware_id->valuedouble;
-                *has_job         = true;
-                result           = CloudResultOk;
-            }
-            else
-            {
-                ESP_LOGE(TAG, "Failed to parse job response");
-            }
-            cJSON_Delete(root);
-        }
+        size_t chunk = written - off < buffer_size ? written - off : buffer_size;
+        JustFlasherError ferr = just_flasher_read(FLASHER_DEFAULT_BASE_ADDR + off, buffer, chunk);
+        if (ferr == JustFlasherOk)
+            mbedtls_sha256_update(&sha, (const unsigned char*) buffer, chunk);
         else
         {
-            ESP_LOGE(TAG, "HTTP GET /device/job: unexpected status = %d", status);
+            *error = just_flasher_err_str(ferr);
+            ok     = false;
         }
+        off += chunk;
     }
 
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return result;
+    uint8_t digest[32];
+    mbedtls_sha256_finish(&sha, digest);
+    mbedtls_sha256_free(&sha);
+
+    if (!ok)
+        return false;
+
+    if (memcmp(digest, job->sha256, sizeof(digest)) != 0)
+    {
+        ESP_LOGW(TAG, "Flash SHA256 mismatch");
+        *error = "sha256 mismatch";
+        return false;
+    }
+
+    return true;
 }
 
 /* GET /device/firmware/{id}: download the firmware and stream it into the
  * target flash. On failure *error points to a short reason for the job report. */
-static bool download_and_flash(const char* host, const char* token, int64_t firmware_id, const char** error)
+static bool download_and_flash(
+    bmcloud_ws_t*         ws,
+    const BmChannelJobType* job,
+    const char*           host,
+    const char*           token,
+    const char**          error)
 {
     *error = "firmware download failed";
 
     char path[64];
-    snprintf(path, sizeof(path), "/device/firmware/%lld", (long long) firmware_id);
+    snprintf(path, sizeof(path), "/device/firmware/%llu", (unsigned long long) job->firmware_id);
 
     char url[256];
     build_url(url, sizeof(url), host, path);
@@ -287,8 +176,6 @@ static bool download_and_flash(const char* host, const char* token, int64_t firm
     }
 
     {
-        // Erase exactly what we are about to download, or the whole main bank
-        // when the server does not report the size
         JustFlasherError ferr = just_flasher_begin(true, CLOUD_FLASHER_LOCK_WAIT_MS);
         if (ferr != JustFlasherOk)
         {
@@ -309,6 +196,10 @@ static bool download_and_flash(const char* host, const char* token, int64_t firm
         char   buffer[FIRMWARE_CHUNK_SIZE];
         size_t written                = 0;
         int    last_progress_reported = -1;
+        mbedtls_sha256_context download_sha;
+        mbedtls_sha256_init(&download_sha);
+        mbedtls_sha256_starts(&download_sha, 0);
+
         while (1)
         {
             int data_read = esp_http_client_read(client, buffer, sizeof(buffer));
@@ -322,6 +213,8 @@ static bool download_and_flash(const char* host, const char* token, int64_t firm
             if (data_read == 0)
                 break;
 
+            mbedtls_sha256_update(&download_sha, (const unsigned char*) buffer, (size_t) data_read);
+
             ferr = just_flasher_write(FLASHER_DEFAULT_BASE_ADDR + written, buffer, data_read);
             if (ferr != JustFlasherOk)
             {
@@ -331,7 +224,8 @@ static bool download_and_flash(const char* host, const char* token, int64_t firm
             }
             written += data_read;
 
-            // Log progress every 10% when the size is known
+            // Log progress every 10% when the size is known; each step also
+            // refreshes the job on the server, so a long flash is not reaped
             if (content_length > 0)
             {
                 int progress = (int) (written * 100 / (size_t) content_length);
@@ -339,12 +233,47 @@ static bool download_and_flash(const char* host, const char* token, int64_t firm
                 {
                     ESP_LOGI(TAG, "Flash progress: %zu / %d bytes (%d%%)", written, content_length, progress);
                     last_progress_reported = progress;
+                    bmcloud_ws_report_job(ws, job->job_id, BmChannelJobFlashing, NULL);
                 }
             }
         }
 
-        // Flush writes, reset the target and release it
-        just_flasher_end();
+        uint8_t download_digest[32];
+        mbedtls_sha256_finish(&download_sha, download_digest);
+        mbedtls_sha256_free(&download_sha);
+
+        if (job->has_sha256 && memcmp(download_digest, job->sha256, sizeof(download_digest)) != 0)
+            ESP_LOGW(TAG, "Downloaded firmware SHA256 mismatch");
+
+        if (written != job->size)
+        {
+            ESP_LOGE(TAG, "Firmware size mismatch: got %zu of %llu bytes", written, (unsigned long long) job->size);
+            *error = "firmware size mismatch";
+            just_flasher_abort();
+            goto out;
+        }
+
+        JustFlasherError complete_error = just_flasher_complete();
+        if (complete_error != JustFlasherOk)
+        {
+            *error = just_flasher_err_str(complete_error);
+            just_flasher_abort();
+            goto out;
+        }
+
+        if (job->has_sha256 && !verify_flash_digest(job, written, buffer, sizeof(buffer), error))
+        {
+            just_flasher_abort();
+            goto out;
+        }
+
+        // Reset the target and release it
+        JustFlasherError end_error = just_flasher_end();
+        if (end_error != JustFlasherOk)
+        {
+            *error = just_flasher_err_str(end_error);
+            goto out;
+        }
         ESP_LOGI(TAG, "Flashed %zu firmware bytes", written);
         ok = true;
     }
@@ -355,87 +284,37 @@ out:
     return ok;
 }
 
-/* POST /device/job/{job_id}: report the outcome of a claimed job */
-static bool report_job(const char* host, const char* token, int64_t job_id, bool success, const char* error)
+/* Run one pushed job: download the firmware, flash it, report the outcome.
+ * The websocket reports are queued and shipped by the sender task, so a
+ * dropped connection does not lose the result. */
+static void run_job(bmcloud_ws_t* ws, const mstring_t* host, const mstring_t* token, const BmChannelJobType* job)
 {
-    char path[64];
-    snprintf(path, sizeof(path), "/device/job/%lld", (long long) job_id);
+    ESP_LOGI(TAG,
+             "Running job %llu: firmware %llu, %llu bytes",
+             (unsigned long long) job->job_id,
+             (unsigned long long) job->firmware_id,
+             (unsigned long long) job->size);
 
-    char url[256];
-    build_url(url, sizeof(url), host, path);
-
-    esp_http_client_config_t config = {
-        .url               = url,
-        .method            = HTTP_METHOD_POST,
-        .timeout_ms        = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to init HTTP client");
-        return false;
-    }
-
-    char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", token);
-    esp_http_client_set_header(client, "Authorization", auth_header);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-
-    char payload[128];
-    int  payload_len;
-    if (success)
-    {
-        payload_len = snprintf(payload, sizeof(payload), "{\"status\":\"done\"}");
-    }
-    else
-    {
-        payload_len = snprintf(payload, sizeof(payload), "{\"status\":\"failed\",\"error\":\"%s\"}", error);
-    }
-
-    bool      ok  = false;
-    esp_err_t err = esp_http_client_open(client, payload_len);
-    if (err == ESP_OK)
-    {
-        if (esp_http_client_write(client, payload, payload_len) == payload_len)
-        {
-            esp_http_client_fetch_headers(client);
-            int status = esp_http_client_get_status_code(client);
-            ESP_LOGI(TAG, "HTTP POST /device/job: status = %d", status);
-            ok = (status == 204 /* HttpStatus_NoContent is not in IDF's enum */);
-        }
-    }
-    else
-    {
-        ESP_LOGE(TAG, "HTTP POST /device/job failed: %s", esp_err_to_name(err));
-    }
-
-    if (!ok)
-        ESP_LOGE(TAG, "Failed to report job result, the job stays flashing on the server");
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return ok;
-}
-
-/* Execute one claimed job: download the firmware, flash it and report the outcome */
-static void run_job(const char* host, const char* token, const CloudJobType* job)
-{
-    ESP_LOGI(TAG, "Claimed job %lld, firmware %lld", (long long) job->job_id, (long long) job->firmware_id);
-    send_state(host, token, CloudDeviceStateBusy);
+    bmcloud_ws_set_state(ws, BmChannelStateBusy);
+    bmcloud_ws_report_job(ws, job->job_id, BmChannelJobFlashing, NULL); // claims the job
 
     const char* error = "firmware download failed";
     bool        ok    = false;
+
     for (int attempt = 1; attempt <= FIRMWARE_MAX_ATTEMPTS && !ok; attempt++)
     {
         if (attempt > 1)
-            ESP_LOGW(TAG, "Retrying job %lld, attempt %d", (long long) job->job_id, attempt);
-        ok = download_and_flash(host, token, job->firmware_id, &error);
+            ESP_LOGW(TAG, "Retrying job %llu, attempt %d", (unsigned long long) job->job_id, attempt);
+        ok = download_and_flash(ws, job, mstring_get_cstr(host), mstring_get_cstr(token), &error);
     }
 
-    report_job(host, token, job->job_id, ok, error);
-    send_state(host, token, ok ? CloudDeviceStateOnline : CloudDeviceStateError);
+    if (ok)
+        ESP_LOGI(TAG, "Job %llu done", (unsigned long long) job->job_id);
+    else
+        ESP_LOGE(TAG, "Job %llu failed: %s", (unsigned long long) job->job_id, error);
+
+    bmcloud_ws_report_job(ws, job->job_id, ok ? BmChannelJobDone : BmChannelJobFailed, ok ? NULL : error);
+    bmcloud_ws_set_state(ws, ok ? BmChannelStateOnline : BmChannelStateError);
 }
 
 static void network_bmcloud_task(void* pvParameters)
@@ -444,9 +323,11 @@ static void network_bmcloud_task(void* pvParameters)
 
     vTaskDelay(pdMS_TO_TICKS(CLOUD_STARTUP_DELAY_MS));
 
-    uint32_t retry_delay_ms = CLOUD_RETRY_MIN_MS;
-    bool       online_sent     = false;      // online announced after the first successful contact
-    mstring_t* announced_host  = mstring_alloc(); // server we have announced online to
+    s_ws = bmcloud_ws_start();
+
+    // at-least-once delivery: the server replays pending jobs on reconnect,
+    // so skip whatever already ran (the last report finishes it server-side)
+    uint64_t last_job_id = 0;
 
     while (1)
     {
@@ -460,66 +341,37 @@ static void network_bmcloud_task(void* pvParameters)
         if (!configured)
         {
             ESP_LOGW(TAG, "Cloud host/token are not set, waiting for configuration");
+            bmcloud_ws_stop(s_ws);
             mstring_free(host);
             mstring_free(token);
             vTaskDelay(pdMS_TO_TICKS(CLOUD_UNCONFIGURED_MS));
             continue;
         }
 
-        // Server changed in the settings: announce online to the new one again
-        if (online_sent && mstring_cmp_cstr(announced_host, mstring_get_cstr(host)) != 0)
-            online_sent = false;
+        // Presence and job pushes; the client reconnects on its own
+        bmcloud_ws_ensure(s_ws, host, token);
 
-        // GET /device/job is both the ping and the work source: it checks
-        // reachability and the token, and claims a job if there is one
-        CloudJobType   job;
-        bool           has_job = false;
-        CloudResultType result = claim_job(mstring_get_cstr(host), mstring_get_cstr(token), &job, &has_job);
-
-        uint32_t wait_ms;
-        if (result == CloudResultOk)
+        BmChannelJobType job;
+        if (bmcloud_ws_pop_job(s_ws, &job))
         {
-            retry_delay_ms = CLOUD_RETRY_MIN_MS;
-            if (!online_sent)
+            if (job.job_id == last_job_id)
             {
-                // Announce ourselves once after the first successful contact
-                // with a server; a claimed job reports busy/online on its own
-                if (!has_job)
-                    send_state(mstring_get_cstr(host), mstring_get_cstr(token), CloudDeviceStateOnline);
-                mstring_set(announced_host, mstring_get_cstr(host));
-                online_sent = true;
-            }
-            if (has_job)
-            {
-                run_job(mstring_get_cstr(host), mstring_get_cstr(token), &job);
-                wait_ms = 0; // pick up the next queued job right away
+                ESP_LOGD(TAG, "Job %llu already ran, skipped", (unsigned long long) job.job_id);
             }
             else
             {
-                wait_ms = CLOUD_POLL_PERIOD_MS;
+                last_job_id = job.job_id;
+                run_job(s_ws, host, token, &job);
             }
-        }
-        else if (result == CloudResultAuthError)
-        {
-            // Retrying with the same token is pointless, but the token can be fixed
-            // from the web UI, so keep re-checking it at a slow fixed rate
-            ESP_LOGE(TAG, "Server rejected the token, check the cloud token in settings");
-            wait_ms = CLOUD_AUTH_RETRY_MS;
+            // no delay: pick up the next queued job right away
         }
         else
         {
-            // Unreachable or broken response: exponential backoff, so we don't hammer
-            // the server (and the log) while it is down
-            ESP_LOGW(TAG, "Cloud unreachable, next attempt in %lu s", (unsigned long) (retry_delay_ms / 1000));
-            wait_ms = retry_delay_ms;
-            retry_delay_ms *= 2;
-            if (retry_delay_ms > CLOUD_RETRY_MAX_MS)
-                retry_delay_ms = CLOUD_RETRY_MAX_MS;
+            vTaskDelay(pdMS_TO_TICKS(CLOUD_POLL_PERIOD_MS));
         }
 
         mstring_free(host);
         mstring_free(token);
-        vTaskDelay(pdMS_TO_TICKS(wait_ms));
     }
 }
 

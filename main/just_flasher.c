@@ -197,23 +197,37 @@ size_t just_flasher_get_flash_size(void)
     return total;
 }
 
+JustFlasherError just_flasher_complete(void)
+{
+    if (s_target == NULL)
+        return JustFlasherErrNoTarget;
+
+    if (s_wrote)
+    {
+        if (!target_flash_complete(s_target))
+        {
+            ESP_LOGW(TAG, "Flash complete operation returned false");
+            return JustFlasherErrWrite;
+        }
+        s_wrote = false;
+    }
+
+    return JustFlasherOk;
+}
+
 JustFlasherError just_flasher_end(void)
 {
     if (s_target == NULL)
         return JustFlasherErrNoTarget;
 
-    if (s_wrote && !target_flash_complete(s_target))
-    {
-        // Data is committed by the writes, original behavior is to warn only
-        ESP_LOGW(TAG, "Flash complete operation returned false");
-    }
+    JustFlasherError complete_error = just_flasher_complete();
 
     // Reset and resume the target
     target_reset(s_target);
     target_halt_resume(s_target, false);
 
     flasher_release();
-    return JustFlasherOk;
+    return complete_error;
 }
 
 void just_flasher_abort(void)

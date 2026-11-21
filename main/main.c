@@ -21,6 +21,7 @@
 #endif
 #include <hal/gpio_ll.h>
 #include <driver/gpio.h>
+#include <soc/gpio_sig_map.h> // SIG_GPIO_OUT_IDX: no longer pulled in transitively since IDF v6
 
 #include "gdb_main.h"
 #include "gdb_if.h"

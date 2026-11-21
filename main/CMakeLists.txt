@@ -7,6 +7,7 @@ idf_component_register(SRCS
     "network-http-settings.c"
     "network-http-target.c"
     "network-bmcloud.c"
+    "network-bmcloud-ws.c"
     "just_flasher.c"
     "network.c"
     "main.c"
@@ -19,7 +20,7 @@ idf_component_register(SRCS
     "uart-serial.c"
     "nvs.c"
     "nvs-config.c"
-    PRIV_REQUIRES esp_wifi esp_https_server esp_http_client mbedtls json nvs_flash esp_driver_uart esp_driver_gpio esp_driver_usb_serial_jtag
+    PRIV_REQUIRES esp_wifi esp_https_server esp_http_client espressif__esp_websocket_client espressif__cjson bmcloud-channel mbedtls nvs_flash esp_driver_uart esp_driver_gpio esp_driver_usb_serial_jtag esp_app_format
     INCLUDE_DIRS "." "${CMAKE_SOURCE_DIR}/frontend/dist")
 
 # Generate frontend header file

@@ -4,3 +4,9 @@
 [submodule "components/mlib"]
 	path = components/mlib
 	url = https://github.com/P-p-H-d/mlib.git
+[submodule "components/bmcloud-proto"]
+	path = components/bmcloud-proto
+	url = git@github.com:BareMetalTestLab/bmcloud-proto.git
+[submodule "third_party/nanopb"]
+	path = third_party/nanopb
+	url = https://github.com/nanopb/nanopb.git

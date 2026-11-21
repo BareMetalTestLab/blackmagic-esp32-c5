@@ -11,6 +11,7 @@
 #include <hal/gpio_ll.h>
 #include <esp_rom_gpio.h>
 #include <led_strip.h>
+#include <soc/gpio_sig_map.h> // SIG_GPIO_OUT_IDX: no longer pulled in transitively since IDF v6
 
 uint32_t swd_delay_cnt = 0;
 uint32_t target_clk_divider = 0;

@@ -35,6 +35,9 @@ JustFlasherError just_flasher_read(uint32_t addr, void* buffer, size_t length);
 /* Total size of the target's main flash bank regions */
 size_t just_flasher_get_flash_size(void);
 
+/* Flush buffered writes so flash reads see the committed image */
+JustFlasherError just_flasher_complete(void);
+
 /* Finish the operation: flush writes, reset and resume the target, release it */
 JustFlasherError just_flasher_end(void);
 

@@ -65,7 +65,6 @@ int bmchannel_encode_capabilities(
     size_t             peripheral_count,
     uint8_t*           buf,
     size_t             size);
-int bmchannel_encode_heartbeat(BmChannelStateType state, uint8_t* buf, size_t size);
 int bmchannel_encode_job_report(
     uint64_t               job_id,
     BmChannelJobStatusType status,

@@ -57,30 +57,6 @@ static void build_url(char* dst, size_t dst_size, const char* host, const char* 
 /* The websocket is shared with network_bmcloud_set_status callers */
 static bmcloud_ws_t* s_ws = NULL;
 
-void network_bmcloud_set_status(CloudDeviceStateType state)
-{
-    // the REST state endpoint is gone: presence state rides the heartbeat now
-    if (s_ws == NULL)
-        return;
-
-    switch (state)
-    {
-    case CloudDeviceStateBusy:
-        bmcloud_ws_set_state(s_ws, BmChannelStateBusy);
-        break;
-    case CloudDeviceStateError:
-        bmcloud_ws_set_state(s_ws, BmChannelStateError);
-        break;
-    case CloudDeviceStateOnline:
-        bmcloud_ws_set_state(s_ws, BmChannelStateOnline);
-        break;
-    case CloudDeviceStateOffline:
-    default:
-        // offline is the server's conclusion from silence, not something we report
-        break;
-    }
-}
-
 /* Verify what actually landed in the target flash: the download is streamed
  * straight into the target, so read the image back and hash it against the
  * digest pushed with the job. Catches both a corrupted download and a bad
@@ -295,7 +271,6 @@ static void run_job(bmcloud_ws_t* ws, const mstring_t* host, const mstring_t* to
              (unsigned long long) job->firmware_id,
              (unsigned long long) job->size);
 
-    bmcloud_ws_set_state(ws, BmChannelStateBusy);
     bmcloud_ws_report_job(ws, job->job_id, BmChannelJobFlashing, NULL); // claims the job
 
     const char* error = "firmware download failed";
@@ -314,7 +289,6 @@ static void run_job(bmcloud_ws_t* ws, const mstring_t* host, const mstring_t* to
         ESP_LOGE(TAG, "Job %llu failed: %s", (unsigned long long) job->job_id, error);
 
     bmcloud_ws_report_job(ws, job->job_id, ok ? BmChannelJobDone : BmChannelJobFailed, ok ? NULL : error);
-    bmcloud_ws_set_state(ws, ok ? BmChannelStateOnline : BmChannelStateError);
 }
 
 static void network_bmcloud_task(void* pvParameters)

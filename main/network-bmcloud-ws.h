@@ -15,9 +15,6 @@ bmcloud_ws_t* bmcloud_ws_start(void);
 void          bmcloud_ws_ensure(bmcloud_ws_t* ws, const mstring_t* host, const mstring_t* token);
 void          bmcloud_ws_stop(bmcloud_ws_t* ws);
 
-/* The state the next heartbeat reports */
-void bmcloud_ws_set_state(bmcloud_ws_t* ws, BmChannelStateType state);
-
 /* Take one pushed job; false when none are waiting */
 bool bmcloud_ws_pop_job(bmcloud_ws_t* ws, BmChannelJobType* job);
 

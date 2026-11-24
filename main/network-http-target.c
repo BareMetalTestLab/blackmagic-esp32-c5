@@ -5,7 +5,6 @@
 #include <string.h>
 #include "just_flasher.h"
 #include "general.h"
-#include "network-bmcloud.h"
 
 #define TAG "network-http-target"
 
@@ -88,10 +87,8 @@ esp_err_t target_flash_upload_post_handler(httpd_req_t* req)
             free(chunk_buffer);
         if (header_buffer)
             free(header_buffer);
-        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
-    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Parse multipart headers to find where binary data starts
     ESP_LOGI(TAG, "Parsing multipart headers...");
@@ -273,13 +270,11 @@ cleanup_early:
     {
         const char* resp = "Firmware flashed successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
-        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
 }
@@ -291,8 +286,6 @@ esp_err_t target_flash_erase_post_handler(httpd_req_t* req)
     const char* error_msg = "Error: Flash operation failed";
 
     flash_params_t params = flash_params(req);
-
-    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Take exclusive ownership of the target and prepare it
     JustFlasherError err = just_flasher_begin(params.use_swd, FLASHER_LOCK_WAIT_MS);
@@ -325,13 +318,11 @@ cleanup_early:
     {
         const char* resp = "Flash erased successfully";
         httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
-        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
 }
@@ -352,8 +343,6 @@ esp_err_t target_flash_read_post_handler(httpd_req_t* req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Error: Out of memory");
         return ESP_FAIL;
     }
-
-    network_bmcloud_set_status(CloudDeviceStateBusy);
 
     // Step 1: Take exclusive ownership of the target and prepare it
     JustFlasherError err = just_flasher_begin(params.use_swd, FLASHER_LOCK_WAIT_MS);
@@ -414,19 +403,15 @@ cleanup:
 cleanup_early:
     if (success)
     {
-        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
     else if (!stream_started)
     {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, error_msg);
-        network_bmcloud_set_status(CloudDeviceStateError);
         return ESP_FAIL;
     }
     else
     {
-        // Response body already started: the client detects the truncated dump by size
-        network_bmcloud_set_status(CloudDeviceStateOnline);
         return ESP_OK;
     }
 }

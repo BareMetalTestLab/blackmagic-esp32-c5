@@ -35,7 +35,6 @@ struct bmcloud_ws_t
     mstring_t*                    host;
     mstring_t*                    token;
     volatile bool                 hello_pending;
-    volatile BmChannelStateType   state;
     QueueHandle_t                 jobs;    // server pushes, the job loop consumes
     QueueHandle_t                 reports; // job reports, the sender task ships them
     uint8_t                       rx[WS_RX_MAX];
@@ -169,7 +168,6 @@ void bmcloud_ws_sender_task(void* pvParameters)
     bmcloud_ws_t* ws = (bmcloud_ws_t*) pvParameters;
 
     uint8_t    frame[192];
-    TickType_t last_beat = 0;
 
     while (1)
     {
@@ -194,7 +192,6 @@ void bmcloud_ws_sender_task(void* pvParameters)
             {
                 ESP_LOGI(TAG, "Capabilities sent (fw %s)", app->version);
                 ws->hello_pending = false;
-                last_beat         = xTaskGetTickCount();
             }
         }
 
@@ -211,16 +208,6 @@ void bmcloud_ws_sender_task(void* pvParameters)
             connected = esp_websocket_client_is_connected(ws->handle);
         }
 
-        if (connected && (xTaskGetTickCount() - last_beat) >= pdMS_TO_TICKS(WS_HEARTBEAT_PERIOD_MS))
-        {
-            int len = bmchannel_encode_heartbeat(ws->state, frame, sizeof(frame));
-            if (len > 0 && esp_websocket_client_send_bin(ws->handle, (char*) frame, len, pdMS_TO_TICKS(2000)) >= 0)
-            {
-                ESP_LOGD(TAG, "Heartbeat sent");
-                last_beat = xTaskGetTickCount();
-            }
-        }
-
         vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
@@ -234,7 +221,6 @@ bmcloud_ws_t* bmcloud_ws_start(void)
         return NULL;
     }
     memset(ws, 0, sizeof(bmcloud_ws_t));
-    ws->state = BmChannelStateOnline;
 
     ws->jobs    = xQueueCreate(WS_JOB_QUEUE_LEN, sizeof(BmChannelJobType));
     ws->reports = xQueueCreate(WS_REPORT_QUEUE_LEN, sizeof(ws_report_t));
@@ -265,12 +251,6 @@ void bmcloud_ws_stop(bmcloud_ws_t* ws)
     mstring_free(ws->token);
     ws->host  = NULL;
     ws->token = NULL;
-}
-
-void bmcloud_ws_set_state(bmcloud_ws_t* ws, BmChannelStateType state)
-{
-    if (ws != NULL)
-        ws->state = state;
 }
 
 bool bmcloud_ws_pop_job(bmcloud_ws_t* ws, BmChannelJobType* job)

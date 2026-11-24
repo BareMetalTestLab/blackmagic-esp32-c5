@@ -46,15 +46,6 @@ int bmchannel_encode_capabilities(
     return encode_envelope(&msg, buf, size);
 }
 
-int bmchannel_encode_heartbeat(BmChannelStateType state, uint8_t* buf, size_t size)
-{
-    bmcloud_DeviceMessage msg = bmcloud_DeviceMessage_init_zero;
-    msg.which_msg         = bmcloud_DeviceMessage_heartbeat_tag;
-    msg.msg.heartbeat.state = (bmcloud_Heartbeat_State) state;
-
-    return encode_envelope(&msg, buf, size);
-}
-
 int bmchannel_encode_job_report(
     uint64_t               job_id,
     BmChannelJobStatusType status,

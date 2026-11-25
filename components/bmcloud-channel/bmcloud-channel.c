@@ -63,44 +63,123 @@ int bmchannel_encode_job_report(
     return encode_envelope(&msg, buf, size);
 }
 
+int bmchannel_encode_transfer_ack(uint32_t transfer_id, uint64_t received_bytes, uint8_t* buf, size_t size)
+{
+    bmcloud_DeviceMessage msg = bmcloud_DeviceMessage_init_zero;
+    msg.which_msg = bmcloud_DeviceMessage_transfer_ack_tag;
+    msg.msg.transfer_ack.transfer_id    = transfer_id;
+    msg.msg.transfer_ack.received_bytes = received_bytes;
+
+    return encode_envelope(&msg, buf, size);
+}
+
+/* Zero-copy view of a TransferChunk payload: the data field has no max_size
+ * in nanopb.options, so nanopb hands it to this callback. The decode input is
+ * a contiguous buffer, so the span is recorded where the bytes already sit
+ * and simply skipped. Multiple invocations extend the same span. */
+typedef struct
+{
+    const uint8_t* start;
+    size_t         len;
+} chunk_span_t;
+
+static bool chunk_peek(pb_istream_t* stream, const pb_field_t* field, void** arg)
+{
+    (void) field;
+    chunk_span_t* span = (chunk_span_t*) *arg;
+
+    size_t         n    = stream->bytes_left;
+    const uint8_t* here = (const uint8_t*) stream->state;
+
+    if (span->start == NULL)
+    {
+        span->start = here;
+        span->len   = n;
+    }
+    else if (here == span->start + span->len)
+    {
+        span->len += n;
+    }
+    else
+    {
+        return false; // not contiguous: refuse rather than report a bogus span
+    }
+
+    return pb_read(stream, NULL, n); // consume without copying
+}
+
+/* nanopb wipes a oneof member before decoding it, so a callback set inside
+ * the union does not survive. The submsg_callback option gives ServerMessage
+ * a message-level hook that runs after the wipe and before the fields: arm
+ * the payload callback there. */
+static bool chunk_arm(pb_istream_t* stream, const pb_field_t* field, void** arg)
+{
+    (void) stream;
+    bmcloud_TransferChunk* chunk = (bmcloud_TransferChunk*) field->pData;
+    chunk->data.funcs.decode = chunk_peek;
+    chunk->data.arg          = *arg;
+    return true;
+}
+
 bool bmchannel_decode(const uint8_t* buf, size_t len, BmChannelServerMsgType* out)
 {
     if (buf == NULL || out == NULL)
         return false;
 
-    // TransferChunk.data makes this struct roughly 16 KB. Keeping it in a
-    // static buffer avoids stack pressure and repeated 16 KB heap allocations.
-    static bmcloud_ServerMessage server;
-    memset(&server, 0, sizeof(server));
+    // with the data field as a callback the whole message fits on the stack
+    bmcloud_ServerMessage msg = bmcloud_ServerMessage_init_zero;
+
+    chunk_span_t span = {0};
+    msg.cb_msg.funcs.decode = chunk_arm;
+    msg.cb_msg.arg          = &span;
 
     pb_istream_t stream = pb_istream_from_buffer(buf, len);
-    bool decoded = pb_decode(&stream, bmcloud_ServerMessage_fields, &server);
-    if (!decoded)
+    if (!pb_decode(&stream, bmcloud_ServerMessage_fields, &msg))
         return false;
 
-    switch (server.which_msg)
+    switch (msg.which_msg)
     {
     case bmcloud_ServerMessage_ack_tag:
         out->kind = BmChannelServerAck;
-        copy_bounded(out->as.for_kind, sizeof(out->as.for_kind), server.msg.ack.for_kind);
+        copy_bounded(out->as.for_kind, sizeof(out->as.for_kind), msg.msg.ack.for_kind);
         break;
 
     case bmcloud_ServerMessage_error_tag:
         out->kind = BmChannelServerError;
-        copy_bounded(out->as.error, sizeof(out->as.error), server.msg.error.text);
+        copy_bounded(out->as.error, sizeof(out->as.error), msg.msg.error.text);
         break;
 
     case bmcloud_ServerMessage_job_tag:
         out->kind = BmChannelServerJob;
         // a job without its firmware half is a contract violation, not a job
-        if (!server.msg.job.has_firmware)
+        if (!msg.msg.job.has_firmware)
             return false;
-        out->as.job.job_id      = server.msg.job.job_id;
-        out->as.job.firmware_id = server.msg.job.firmware.firmware_id;
-        out->as.job.size        = server.msg.job.firmware.size;
-        out->as.job.has_sha256  = server.msg.job.firmware.sha256.size == sizeof(out->as.job.sha256);
+        out->as.job.job_id      = msg.msg.job.job_id;
+        out->as.job.firmware_id = msg.msg.job.firmware.firmware_id;
+        out->as.job.size        = msg.msg.job.firmware.size;
+        out->as.job.has_sha256  = msg.msg.job.firmware.sha256.size == sizeof(out->as.job.sha256);
         if (out->as.job.has_sha256)
-            memcpy(out->as.job.sha256, server.msg.job.firmware.sha256.bytes, sizeof(out->as.job.sha256));
+            memcpy(out->as.job.sha256, msg.msg.job.firmware.sha256.bytes, sizeof(out->as.job.sha256));
+        break;
+
+    case bmcloud_ServerMessage_transfer_begin_tag:
+        out->kind                 = BmChannelServerTransferBegin;
+        out->as.begin.transfer_id = msg.msg.transfer_begin.transfer_id;
+        out->as.begin.total_size  = msg.msg.transfer_begin.total_size;
+        break;
+
+    case bmcloud_ServerMessage_transfer_chunk_tag:
+        out->kind                 = BmChannelServerTransferChunk;
+        out->as.chunk.transfer_id = msg.msg.transfer_chunk.transfer_id;
+        out->as.chunk.offset      = msg.msg.transfer_chunk.offset;
+        // points into the decode input; valid until the next decode call
+        out->as.chunk.data     = span.start != NULL ? span.start : buf;
+        out->as.chunk.data_len = span.len;
+        break;
+
+    case bmcloud_ServerMessage_transfer_end_tag:
+        out->kind               = BmChannelServerTransferEnd;
+        out->as.end.transfer_id = msg.msg.transfer_end.transfer_id;
         break;
 
     default:

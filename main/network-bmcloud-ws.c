@@ -1,6 +1,9 @@
 #include "network-bmcloud-ws.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
+#include "freertos/stream_buffer.h"
 #include "m-string.h"
 #include <ctype.h>
 #include <esp_app_desc.h>
@@ -11,13 +14,20 @@
 
 #define TAG "cloud"
 
-/* --- Device websocket: presence and job push channel --- */
+/* --- Device websocket: presence, job push and firmware transfer channel --- */
 
-#define WS_HEARTBEAT_PERIOD_MS (10 * 1000)  // the server marks us offline after 30 s of silence
-#define WS_BUFFER_SIZE         (1024)
-#define WS_RX_MAX              (256)        // ack / error / job frames; bigger frames are dropped
-#define WS_JOB_QUEUE_LEN       (4)          // the server replays pending jobs on reconnect
-#define WS_REPORT_QUEUE_LEN    (8)          // at-least-once; drops are tolerable, silence is not
+#define WS_BUFFER_SIZE (1024)  // transport read granularity; frames reassemble regardless
+#define WS_RX_MAX      (16 * 1024 + 512)         // a whole TransferChunk frame plus envelope overhead
+#define WS_STREAM_SIZE (16 * 1024 + 512)         // one chunk in flight; TCP backpressure holds the rest
+#define WS_JOB_QUEUE_LEN       (4)               // the server replays pending jobs on reconnect
+#define WS_REPORT_QUEUE_LEN    (8)               // at-least-once; drops are tolerable, silence is not
+#define WS_SEND_BLOCK_MS       (30 * 1000)       // stream write bound: the up-front image erase takes ~15 s
+#define WS_TX_TIMEOUT_MS       (500)            // sends share only the tx lock with pings (SEPARATE_TX_LOCK); the bound just notices a dead peer
+#define WS_ACK_TIMEOUT_MS      (10 * 1000)       // a stalled receiver fails the transfer
+
+/* Event bits: wake the sender, signal a fresh TransferBegin to the job loop */
+#define WS_EVT_WAKE     (1 << 0)
+#define WS_EVT_FW_BEGIN (1 << 1)
 
 /* What this stand can serve; the server shows the list to consumers */
 static const char* const ws_peripherals[] = {"swd", "rtt0", "uart0"};
@@ -32,18 +42,54 @@ typedef struct
 struct bmcloud_ws_t
 {
     esp_websocket_client_handle_t handle;
+    SemaphoreHandle_t             send_lock;  // serializes sends against stop/destroy
+    StaticSemaphore_t             send_lock_mem;
     mstring_t*                    host;
     mstring_t*                    token;
     volatile bool                 hello_pending;
     QueueHandle_t                 jobs;    // server pushes, the job loop consumes
     QueueHandle_t                 reports; // job reports, the sender task ships them
+    EventGroupHandle_t            events;
     uint8_t                       rx[WS_RX_MAX];
     size_t                        rx_len;
     bool                          rx_overflow;
+
+    /* Firmware transfer receiver: one byte stream, transfers strictly
+     * sequential on the wire (Begin → chunks → End → next Begin). */
+    StreamBufferHandle_t          fw_stream;    // chunk payloads, the job loop drains them into flash
+    StaticStreamBuffer_t          fw_stream_mem;
+    uint8_t                       fw_stream_buf[WS_STREAM_SIZE];
+    volatile uint32_t             fw_seq;       // increments per Begin
+    volatile uint32_t             fw_consumed;  // last seq the job loop waited for
+    volatile uint32_t             fw_id;        // active transfer
+    volatile uint64_t             fw_total;
+    volatile uint64_t             fw_rx_bytes;  // bytes pushed into the stream this transfer
+    volatile bool                 fw_end;
+    volatile const char*          fw_error;
+
+    /* Pending cumulative ack, shipped by the sender task */
+    portMUX_TYPE                  ack_lock;
+    bool                          ack_pending;
+    uint32_t                      ack_transfer_id;
+    uint64_t                      ack_received;
 };
 
-/* ws(s) URL by the same rule as build_url: explicit scheme wins, bare IP is
- * plain ws for local testing, domains go through TLS */
+/* Send a frame unless the socket is being torn down. The job loop may stop
+ * and destroy the client at any moment (a failed job, a config change):
+ * without this lock the sender would race a send against destroy and touch
+ * a freed client. */
+static int ws_send(bmcloud_ws_t* ws, const uint8_t* frame, int len)
+{
+    xSemaphoreTake(ws->send_lock, portMAX_DELAY);
+    int res = -1;
+    if (ws->handle != NULL)
+        res = esp_websocket_client_send_bin(ws->handle, (const char*) frame, len, pdMS_TO_TICKS(WS_TX_TIMEOUT_MS));
+    xSemaphoreGive(ws->send_lock);
+    return res;
+}
+
+/* ws(s) URL: explicit scheme wins, bare IP is plain ws for local testing,
+ * domains go through TLS */
 static void build_ws_url(char* dst, size_t dst_size, const char* host)
 {
     if (strncmp(host, "http://", 7) == 0)
@@ -68,6 +114,42 @@ static void build_ws_url(char* dst, size_t dst_size, const char* host)
     }
 
     snprintf(dst, dst_size, "%s://%s/device/ws", is_ip ? "ws" : "wss", host);
+}
+
+/* Push one chunk payload into the stream, waiting out a slow consumer
+ * (the up-front image erase or the post-write readback). Short slices with
+ * an error check between them: a failed job cancels the receiver within one
+ * slice instead of blocking the websocket client task — and its locks — for
+ * the whole budget. Past the overall bound the transfer fails. */
+static void fw_feed(bmcloud_ws_t* ws, const uint8_t* data, size_t len)
+{
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(WS_SEND_BLOCK_MS);
+
+    size_t done = 0;
+    while (done < len)
+    {
+        if (ws->fw_error != NULL)
+            break; // the job loop gave up: drop the rest of the transfer
+
+        TickType_t left = deadline - xTaskGetTickCount();
+        if ((int32_t) left <= 0)
+            break;
+
+        size_t want = len - done;
+        if (want > 1024)
+            want = 1024;
+        size_t n = xStreamBufferSend(ws->fw_stream, data + done, want, left < pdMS_TO_TICKS(250) ? left : pdMS_TO_TICKS(250));
+        if (n == 0 && left <= pdMS_TO_TICKS(250))
+            break; // the budget is exhausted
+        done += n;
+    }
+
+    ws->fw_rx_bytes += done;
+    if (done < len && ws->fw_error == NULL)
+    {
+        ESP_LOGE(TAG, "Transfer %u receiver stalled, failing the transfer", ws->fw_id);
+        ws->fw_error = "receive buffer stalled";
+    }
 }
 
 /* One server frame may arrive split across several DATA events: reassemble
@@ -114,6 +196,47 @@ static void ws_handle_frame(bmcloud_ws_t* ws, esp_websocket_event_data_t* data)
         if (xQueueSend(ws->jobs, &msg.as.job, 0) != pdTRUE)
             ESP_LOGW(TAG, "Job queue full, the push is replayed on reconnect");
         break;
+    case BmChannelServerTransferBegin:
+        ESP_LOGI(TAG,
+                 "Transfer %u begins: %llu bytes",
+                 (unsigned) msg.as.begin.transfer_id,
+                 (unsigned long long) msg.as.begin.total_size);
+        ws->fw_id       = msg.as.begin.transfer_id;
+        ws->fw_total    = msg.as.begin.total_size;
+        ws->fw_rx_bytes = 0;
+        ws->fw_end      = false;
+        ws->fw_seq++;
+        xEventGroupSetBits(ws->events, WS_EVT_FW_BEGIN);
+        break;
+    case BmChannelServerTransferChunk:
+        // after a failure the rest of the transfer is drained and dropped;
+        // the job loop forces a reconnect to resynchronize
+        if (ws->fw_error != NULL)
+            break;
+        if (msg.as.chunk.transfer_id != ws->fw_id)
+        {
+            // id 0 follows an in-place reset: dropping the old transfer's
+            // remainder is expected, not worth a warning per chunk
+            if (ws->fw_id != 0)
+                ESP_LOGW(TAG, "Chunk of unknown transfer %u dropped", (unsigned) msg.as.chunk.transfer_id);
+            break;
+        }
+        if (msg.as.chunk.offset != ws->fw_rx_bytes)
+        {
+            ESP_LOGE(TAG, "Transfer %u chunk offset %llu, expected %llu",
+                     (unsigned) msg.as.chunk.transfer_id,
+                     (unsigned long long) msg.as.chunk.offset,
+                     (unsigned long long) ws->fw_rx_bytes);
+            ws->fw_error = "chunk offset mismatch";
+            break;
+        }
+        fw_feed(ws, msg.as.chunk.data, msg.as.chunk.data_len);
+        break;
+    case BmChannelServerTransferEnd:
+        ESP_LOGI(TAG, "Transfer %u complete on the wire", (unsigned) msg.as.end.transfer_id);
+        if (msg.as.end.transfer_id == ws->fw_id)
+            ws->fw_end = true;
+        break;
     case BmChannelServerError:
         ESP_LOGW(TAG, "Server error: %s", msg.as.error);
         break;
@@ -137,6 +260,7 @@ static void ws_event_handler(void* arg, esp_event_base_t base, int32_t event_id,
         ESP_LOGI(TAG, "Websocket connected");
         // the sender task picks it up: single writer for the socket
         ws->hello_pending = true;
+        xEventGroupSetBits(ws->events, WS_EVT_WAKE);
         break;
     case WEBSOCKET_EVENT_DATA:
         if (data != NULL)
@@ -150,6 +274,9 @@ static void ws_event_handler(void* arg, esp_event_base_t base, int32_t event_id,
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "Websocket disconnected, the client reconnects on its own");
+        // a dropped transfer cannot resume: the job loop restarts the socket
+        if (ws->fw_error == NULL && !ws->fw_end)
+            ws->fw_error = "connection reset";
         break;
     case WEBSOCKET_EVENT_ERROR:
         ESP_LOGE(TAG, "Websocket error");
@@ -160,17 +287,19 @@ static void ws_event_handler(void* arg, esp_event_base_t base, int32_t event_id,
 }
 
 /* Single writer for the websocket: capabilities right after the connection,
- * queued job reports, then a heartbeat every 10 s. A separate task from the
- * job loop, because flashing can hold the target for minutes and must not
- * stall the heartbeat. */
+ * then queued job reports and transfer acks, woken on demand. A separate
+ * task from the job loop, because flashing can hold the target for minutes
+ * and must not stall the channel. */
 void bmcloud_ws_sender_task(void* pvParameters)
 {
     bmcloud_ws_t* ws = (bmcloud_ws_t*) pvParameters;
 
-    uint8_t    frame[192];
+    uint8_t frame[192];
 
     while (1)
     {
+        xEventGroupWaitBits(ws->events, WS_EVT_WAKE, pdTRUE, pdFALSE, pdMS_TO_TICKS(250));
+
         if (ws->handle == NULL)
         {
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -188,27 +317,47 @@ void bmcloud_ws_sender_task(void* pvParameters)
                 sizeof(ws_peripherals) / sizeof(ws_peripherals[0]),
                 frame,
                 sizeof(frame));
-            if (len > 0 && esp_websocket_client_send_bin(ws->handle, (char*) frame, len, pdMS_TO_TICKS(2000)) >= 0)
+            if (len > 0 && ws_send(ws, frame, len) >= 0)
             {
                 ESP_LOGI(TAG, "Capabilities sent (fw %s)", app->version);
                 ws->hello_pending = false;
             }
         }
 
-        // job reports go first: outcomes must not wait behind the heartbeat
+        while (connected)
+        {
+            // a transfer ack first: the server's send window waits on it
+            taskENTER_CRITICAL(&ws->ack_lock);
+            bool     pending = ws->ack_pending;
+            uint32_t id      = ws->ack_transfer_id;
+            uint64_t bytes   = ws->ack_received;
+            taskEXIT_CRITICAL(&ws->ack_lock);
+
+            int len = -1;
+            if (pending)
+                len = bmchannel_encode_transfer_ack(id, bytes, frame, sizeof(frame));
+            if (!pending || len <= 0 || ws_send(ws, frame, len) < 0)
+                break; // not delivered: keep it pending for the next round
+
+            taskENTER_CRITICAL(&ws->ack_lock);
+            if (ws->ack_transfer_id == id && ws->ack_received == bytes)
+                ws->ack_pending = false; // a newer ack may already wait: keep it
+            taskEXIT_CRITICAL(&ws->ack_lock);
+            connected = ws->handle != NULL;
+        }
+
+        // job reports follow: outcomes must not wait behind the window acks
         while (connected)
         {
             ws_report_t rep;
             if (xQueuePeek(ws->reports, &rep, 0) != pdTRUE)
                 break;
             int len = bmchannel_encode_job_report(rep.job_id, rep.status, rep.error, frame, sizeof(frame));
-            if (len <= 0 || esp_websocket_client_send_bin(ws->handle, (char*) frame, len, pdMS_TO_TICKS(2000)) < 0)
+            if (len <= 0 || ws_send(ws, frame, len) < 0)
                 break; // not delivered: keep it queued for the next round
             xQueueReceive(ws->reports, &rep, 0); // pop what was peeked
-            connected = esp_websocket_client_is_connected(ws->handle);
+            connected = ws->handle != NULL;
         }
-
-        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 
@@ -221,14 +370,22 @@ bmcloud_ws_t* bmcloud_ws_start(void)
         return NULL;
     }
     memset(ws, 0, sizeof(bmcloud_ws_t));
+    ws->send_lock = xSemaphoreCreateMutexStatic(&ws->send_lock_mem);
 
     ws->jobs    = xQueueCreate(WS_JOB_QUEUE_LEN, sizeof(BmChannelJobType));
     ws->reports = xQueueCreate(WS_REPORT_QUEUE_LEN, sizeof(ws_report_t));
-    if (ws->jobs == NULL || ws->reports == NULL)
+    ws->events  = xEventGroupCreate();
+    ws->fw_stream = xStreamBufferCreateStatic(
+        sizeof(ws->fw_stream_buf), 1, ws->fw_stream_buf, &ws->fw_stream_mem);
+    if (ws->jobs == NULL || ws->reports == NULL || ws->events == NULL || ws->fw_stream == NULL)
     {
         ESP_LOGE(TAG, "Failed to allocate the websocket queues");
-        vQueueDelete(ws->jobs);
-        vQueueDelete(ws->reports);
+        if (ws->jobs != NULL)
+            vQueueDelete(ws->jobs);
+        if (ws->reports != NULL)
+            vQueueDelete(ws->reports);
+        if (ws->events != NULL)
+            vEventGroupDelete(ws->events);
         free(ws);
         return NULL;
     }
@@ -238,19 +395,42 @@ bmcloud_ws_t* bmcloud_ws_start(void)
     return ws;
 }
 
+/* Drop the websocket and reset the transfer receiver; the next ensure()
+ * reconnects and the server replays what is still pending */
 void bmcloud_ws_stop(bmcloud_ws_t* ws)
 {
-    if (ws == NULL || ws->handle == NULL)
+    if (ws == NULL)
         return;
 
-    esp_websocket_client_stop(ws->handle);
-    esp_websocket_client_destroy(ws->handle);
-    ws->handle = NULL;
+    // Under the send lock: the sender task may be inside a send on this very
+    // client, destroy must not race it (use-after-free panic otherwise)
+    if (ws->handle != NULL)
+    {
+        xSemaphoreTake(ws->send_lock, portMAX_DELAY);
+        esp_websocket_client_handle_t handle = ws->handle;
+        ws->handle = NULL;
+        xSemaphoreGive(ws->send_lock);
 
-    mstring_free(ws->host);
-    mstring_free(ws->token);
-    ws->host  = NULL;
-    ws->token = NULL;
+        esp_websocket_client_stop(handle);
+        esp_websocket_client_destroy(handle);
+    }
+
+    // mstring_free(NULL) asserts: the socket may be stopped before ever
+    // having been started (unconfigured, failed init)
+    if (ws->host != NULL)
+    {
+        mstring_free(ws->host);
+        ws->host = NULL;
+    }
+    if (ws->token != NULL)
+    {
+        mstring_free(ws->token);
+        ws->token = NULL;
+    }
+
+    // receiver state gets the same in-place resync; the handler task is gone
+    // with the client, so the stream reset cannot contend with a feed
+    bmcloud_ws_fw_reset(ws);
 }
 
 bool bmcloud_ws_pop_job(bmcloud_ws_t* ws, BmChannelJobType* job)
@@ -274,6 +454,109 @@ void bmcloud_ws_report_job(bmcloud_ws_t* ws, uint64_t job_id, BmChannelJobStatus
 
     if (xQueueSend(ws->reports, &rep, 0) != pdTRUE)
         ESP_LOGW(TAG, "Report queue full, a report was dropped");
+    else
+        xEventGroupSetBits(ws->events, WS_EVT_WAKE);
+}
+
+bool bmcloud_ws_fw_wait_begin(bmcloud_ws_t* ws, uint32_t timeout_ms, BmChannelTransferInfoType* info)
+{
+    if (ws == NULL || ws->fw_stream == NULL)
+        return false;
+
+    uint32_t seen = ws->fw_consumed;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    while (ws->fw_seq == seen)
+    {
+        TickType_t left = deadline - xTaskGetTickCount();
+        if ((int32_t) left <= 0)
+            return false;
+        xEventGroupWaitBits(ws->events, WS_EVT_FW_BEGIN, pdTRUE, pdFALSE, left);
+        if (ws->fw_error != NULL)
+            return false;
+    }
+    ws->fw_consumed = ws->fw_seq;
+
+    if (ws->fw_error != NULL)
+        return false;
+    info->transfer_id = ws->fw_id;
+    info->total_size  = ws->fw_total;
+    return true;
+}
+
+size_t bmcloud_ws_fw_read(bmcloud_ws_t* ws, void* buf, size_t len, uint32_t timeout_ms)
+{
+    if (ws == NULL || ws->fw_stream == NULL || len == 0)
+        return 0;
+    return xStreamBufferReceive(ws->fw_stream, buf, len, pdMS_TO_TICKS(timeout_ms));
+}
+
+bool bmcloud_ws_fw_is_done(bmcloud_ws_t* ws)
+{
+    if (ws == NULL || ws->fw_stream == NULL)
+        return false;
+    return ws->fw_end && xStreamBufferBytesAvailable(ws->fw_stream) == 0;
+}
+
+const char* bmcloud_ws_fw_error(bmcloud_ws_t* ws)
+{
+    if (ws == NULL)
+        return "no websocket";
+    return (const char*) ws->fw_error;
+}
+
+/* Cancel the receiver from the job loop side (e.g. the flasher failed while
+ * the transfer keeps arriving): the handler drops the rest within one slice
+ * instead of blocking on a full stream until the budget expires */
+void bmcloud_ws_fw_fail(bmcloud_ws_t* ws, const char* reason)
+{
+    if (ws == NULL || ws->fw_error != NULL)
+        return;
+    if (reason == NULL)
+        reason = "receiver cancelled";
+    ws->fw_error = reason;
+}
+
+void bmcloud_ws_fw_reset(bmcloud_ws_t* ws)
+{
+    if (ws == NULL || ws->fw_stream == NULL)
+        return;
+
+    // keep the failure set while resetting: it is what makes the handler
+    // drop the rest of the old transfer instead of feeding it back in
+    if (ws->fw_error == NULL)
+        ws->fw_error = "receiver reset";
+
+    // Release the server's send window before wiping the id: transfers are
+    // strictly sequential there and one that nobody acks parks the whole
+    // queue — the next job would wait out its begin timeout behind a dead
+    // transfer. Acknowledging the full size makes the server flush the rest
+    // (dropped below), send its End and move on; job status is untouched,
+    // outcomes travel only in job reports
+    if (ws->fw_id != 0)
+        bmcloud_ws_fw_ack(ws, ws->fw_id, ws->fw_total);
+
+    ws->fw_id = 0; // matches no live transfer: the old one's late chunks are dropped
+
+    // the handler may sit in a bounded stream send: retry until it lets go
+    for (int i = 0; i < WS_ACK_TIMEOUT_MS / 100 && xStreamBufferReset(ws->fw_stream) != pdPASS; i++)
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+    ws->fw_error = NULL;
+    ws->fw_end   = false;
+}
+
+void bmcloud_ws_fw_ack(bmcloud_ws_t* ws, uint32_t transfer_id, uint64_t received_bytes)
+{
+    if (ws == NULL)
+        return;
+
+    taskENTER_CRITICAL(&ws->ack_lock);
+    ws->ack_pending     = true; // cumulative: the latest value subsumes the older ones
+    ws->ack_transfer_id = transfer_id;
+    ws->ack_received    = received_bytes;
+    taskEXIT_CRITICAL(&ws->ack_lock);
+
+    xEventGroupSetBits(ws->events, WS_EVT_WAKE);
 }
 
 /* Start the websocket once host/token are known; restart when they change in the settings */

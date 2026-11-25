@@ -39,3 +39,8 @@ CONFIG_ESP_WIFI_PASSWORD="mypassword"
 
 # Component Configuration
 # Note: WHOLE_ARCHIVE is set in components/esp32-platform/CMakeLists.txt
+
+# Websocket client: separate tx lock - sends must not contend with the receive
+# path, which holds client->lock for as long as the chunk handler parks on a
+# full stream buffer (a slow flash drain)
+CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y

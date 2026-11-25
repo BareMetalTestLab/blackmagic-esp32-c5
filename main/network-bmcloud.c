@@ -4,76 +4,57 @@
 #include "freertos/idf_additions.h"
 #include "m-string.h"
 #include "nvs-config.h"
-#include <ctype.h>
-#include <esp_crt_bundle.h>
-#include <esp_http_client.h>
-#include <mbedtls/private/sha256.h>
+#include <psa/crypto.h>
 #include <stdint.h>
 #include <string.h>
 #include "esp_log.h"
 
 #define TAG "cloud"
 
-/* Jobs arrive as pushes on the device websocket (bmcloud-channel frames);
- * this file runs them: downloads the firmware over REST, flashes it and
- * reports the outcome back over the websocket. */
-
-/* Build request URL from the stored host.
- * Host may be a bare domain, a bare IP or a full URL with scheme:
- *   paulfirs.com      -> https://paulfirs.com/...
- *   192.168.1.50      -> http://192.168.1.50/...  (local testing)
- *   http://192.168.1.50:8080 -> scheme wins
- */
-static void build_url(char* dst, size_t dst_size, const char* host, const char* path)
-{
-    if (strncmp(host, "http://", 7) == 0 || strncmp(host, "https://", 8) == 0)
-    {
-        snprintf(dst, dst_size, "%s%s", host, path);
-        return;
-    }
-
-    bool is_ip = true;
-    for (const char* p = host; *p != '\0'; p++)
-    {
-        if (!isdigit((unsigned char) *p) && *p != '.' && *p != ':')
-        {
-            is_ip = false;
-            break;
-        }
-    }
-
-    snprintf(dst, dst_size, "%s://%s%s", is_ip ? "http" : "https", host, path);
-}
+/* Jobs arrive as pushes on the device websocket, the firmware follows as a
+ * transfer on the same socket (bmcloud-channel frames); this file runs them:
+ * streams the chunks into the target flash, verifies and reports the outcome. */
 
 /* --- Job runner --- */
 
 #define CLOUD_STARTUP_DELAY_MS     (5 * 1000)        // give the network time to come up after boot
 #define CLOUD_POLL_PERIOD_MS       (500)             // job queue poll while idle
 #define CLOUD_UNCONFIGURED_MS      (10 * 1000)       // re-read NVS while host/token are not set
-#define FIRMWARE_CHUNK_SIZE        (1024)            // download read chunk
-#define FIRMWARE_MAX_ATTEMPTS      (3)               // download retries before reporting a failed job
-#define CLOUD_FLASHER_LOCK_WAIT_MS (10 * 60 * 1000)  // wait out a concurrent web flash before failing the job
+#define CLOUD_FLASHER_LOCK_WAIT_MS (5 * 1000)        // bounded short: the transfer streams in right behind the job push, a lock wait longer than the receiver budget just converts "device busy" into a stall
 
-/* The websocket is shared with network_bmcloud_set_status callers */
+#define FW_BEGIN_TIMEOUT_MS (15 * 1000)  // the transfer follows its Job frame immediately
+#define FW_READ_TIMEOUT_MS  (10 * 1000)  // no chunk within this: the transfer is stalled
+#define FW_END_TIMEOUT_MS   (3 * 1000)   // the End frame trails the last chunk closely
+#define FW_CHUNK            (1024)       // flash write granularity
+#define FW_ACK_STEP         (4 * 1024)   // cumulative ack granularity, paces the server window
+
+/* The one websocket of the cloud task */
 static bmcloud_ws_t* s_ws = NULL;
 
-/* Verify what actually landed in the target flash: the download is streamed
+/* Verify what actually landed in the target flash: the transfer is streamed
  * straight into the target, so read the image back and hash it against the
- * digest pushed with the job. Catches both a corrupted download and a bad
+ * digest pushed with the job. Catches both a corrupted transfer and a bad
  * write. On failure *error points to the reason. */
-static bool verify_flash_digest(const BmChannelJobType* job, size_t written, char* buffer, size_t buffer_size, const char** error)
+static bool verify_flash_digest(const BmChannelJobType* job,
+                                size_t                  written,
+                                char*                   buffer,
+                                size_t                  buffer_size,
+                                const char**            error)
 {
-    mbedtls_sha256_context sha;
-    mbedtls_sha256_init(&sha);
-    mbedtls_sha256_starts(&sha, 0);
+    psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
+    if (psa_hash_setup(&sha, PSA_ALG_SHA_256) != PSA_SUCCESS)
+    {
+        *error = "psa hash init failed";
+        return false;
+    }
 
     bool ok = true;
-    for (size_t off = 0; off < written && ok; )
+    for (size_t off = 0; off < written && ok;)
     {
-        size_t chunk = written - off < buffer_size ? written - off : buffer_size;
-        JustFlasherError ferr = just_flasher_read(FLASHER_DEFAULT_BASE_ADDR + off, buffer, chunk);
+        size_t           chunk = written - off < buffer_size ? written - off : buffer_size;
+        JustFlasherError ferr  = just_flasher_read(FLASHER_DEFAULT_BASE_ADDR + off, buffer, chunk);
         if (ferr == JustFlasherOk)
-            mbedtls_sha256_update(&sha, (const unsigned char*) buffer, chunk);
+            psa_hash_update(&sha, (const uint8_t*) buffer, chunk);
         else
         {
             *error = just_flasher_err_str(ferr);
@@ -83,8 +64,13 @@ static bool verify_flash_digest(const BmChannelJobType* job, size_t written, cha
     }
 
     uint8_t digest[32];
-    mbedtls_sha256_finish(&sha, digest);
-    mbedtls_sha256_free(&sha);
+    size_t digest_len = 0;
+    if (ok && psa_hash_finish(&sha, digest, sizeof(digest), &digest_len) != PSA_SUCCESS)
+    {
+        *error = "psa hash finish failed";
+        ok     = false;
+    }
+    psa_hash_abort(&sha);
 
     if (!ok)
         return false;
@@ -99,171 +85,198 @@ static bool verify_flash_digest(const BmChannelJobType* job, size_t written, cha
     return true;
 }
 
-/* GET /device/firmware/{id}: download the firmware and stream it into the
- * target flash. On failure *error points to a short reason for the job report. */
-static bool download_and_flash(
-    bmcloud_ws_t*         ws,
-    const BmChannelJobType* job,
-    const char*           host,
-    const char*           token,
-    const char**          error)
+/* What the job loop streams into the target flash */
+typedef struct
 {
-    *error = "firmware download failed";
+    bmcloud_ws_t*            ws;
+    uint64_t                 job_id;
+    uint32_t                 transfer_id;
+    size_t                   total;
+    psa_hash_operation_t*    sha;           // running digest of the transferred bytes
+    size_t                   written;
+    size_t                   acked;
+    int                      last_progress;
+} fw_sink_t;
 
-    char path[64];
-    snprintf(path, sizeof(path), "/device/firmware/%llu", (unsigned long long) job->firmware_id);
+/* Hash, write and account for one buffer of transferred firmware */
+static bool fw_sink_write(fw_sink_t* sink, const char* buffer, size_t len, const char** error)
+{
+    psa_hash_update(sink->sha, (const uint8_t*) buffer, len);
 
-    char url[256];
-    build_url(url, sizeof(url), host, path);
-
-    esp_http_client_config_t config = {
-        .url               = url,
-        .method            = HTTP_METHOD_GET,
-        .timeout_ms        = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL)
+    JustFlasherError ferr = just_flasher_write(FLASHER_DEFAULT_BASE_ADDR + sink->written, buffer, len);
+    if (ferr != JustFlasherOk)
     {
-        ESP_LOGE(TAG, "Failed to init HTTP client");
+        *error = just_flasher_err_str(ferr);
+        return false;
+    }
+    sink->written += len;
+
+    if (sink->written - sink->acked >= FW_ACK_STEP || sink->written == sink->total)
+    {
+        bmcloud_ws_fw_ack(sink->ws, sink->transfer_id, sink->written);
+        sink->acked = sink->written;
+    }
+
+    // Log progress every 10%; each step also refreshes the job on the server,
+    // so a long flash is not reaped
+    int progress = (int) (sink->written * 100 / sink->total);
+    if (progress / 10 > sink->last_progress / 10)
+    {
+        ESP_LOGI(TAG, "Flash progress: %zu / %zu bytes (%d%%)", sink->written, sink->total, progress);
+        sink->last_progress = progress;
+        bmcloud_ws_report_job(sink->ws, sink->job_id, BmChannelJobFlashing, NULL);
+    }
+    return true;
+}
+
+/* Receive the firmware transfer and stream it into the target flash. The
+ * transfer follows the job push on the same websocket; chunks land in a
+ * receive buffer and are drained into flash as they arrive, with cumulative
+ * acks pacing the server. On failure *error points to a short reason. */
+static bool flash_from_transfer(bmcloud_ws_t* ws, const BmChannelJobType* job, const char** error)
+{
+    *error = "firmware transfer failed";
+
+    BmChannelTransferInfoType info;
+    if (!bmcloud_ws_fw_wait_begin(ws, FW_BEGIN_TIMEOUT_MS, &info))
+    {
+        *error = bmcloud_ws_fw_error(ws) != NULL ? bmcloud_ws_fw_error(ws) : "no transfer from the server";
+        return false;
+    }
+    if (info.total_size != job->size)
+    {
+        ESP_LOGE(TAG,
+                 "Transfer %u size %llu, job says %llu",
+                 (unsigned) info.transfer_id,
+                 (unsigned long long) info.total_size,
+                 (unsigned long long) job->size);
+        *error = "transfer size mismatch";
+        return false;
+    }
+    if (info.total_size == 0 || info.total_size > 16 * 1024 * 1024)
+    {
+        *error = "bad firmware size";
         return false;
     }
 
-    char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", token);
-    esp_http_client_set_header(client, "Authorization", auth_header);
+    JustFlasherError ferr = just_flasher_begin(true, CLOUD_FLASHER_LOCK_WAIT_MS);
+    if (ferr != JustFlasherOk)
+    {
+        *error = just_flasher_err_str(ferr);
+        return false;
+    }
+
+    char                buffer[FW_CHUNK];
+    psa_hash_operation_t download_sha = PSA_HASH_OPERATION_INIT;
+    if (psa_hash_setup(&download_sha, PSA_ALG_SHA_256) != PSA_SUCCESS)
+    {
+        *error = "psa hash init failed";
+        just_flasher_abort();
+        return false;
+    }
+
+    fw_sink_t sink = {
+        .ws           = ws,
+        .job_id       = job->job_id,
+        .transfer_id  = info.transfer_id,
+        .total        = (size_t) info.total_size,
+        .sha          = &download_sha,
+        .written      = 0,
+        .acked        = 0,
+        .last_progress = -1,
+    };
 
     bool ok = false;
 
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK)
+    // Erase the whole image up front, before the first write: an erase after
+    // a write discards the driver's unwritten buffer tail (flash_done frees
+    // it without flushing), so erasing between writes punches 1 KB holes in
+    // the image. The erase takes ~15 s for a large image: the receive buffer
+    // plus TCP backpressure hold the transfer, and the block budget below
+    // keeps the websocket client task (and its pings) alive through it
+    ferr = just_flasher_erase(FLASHER_DEFAULT_BASE_ADDR, sink.total);
+    if (ferr != JustFlasherOk)
     {
-        ESP_LOGE(TAG, "HTTP GET firmware failed: %s", esp_err_to_name(err));
+        *error = just_flasher_err_str(ferr);
+        just_flasher_abort();
+        goto out;
+    }
+    bmcloud_ws_report_job(ws, job->job_id, BmChannelJobFlashing, NULL); // keep the watchdog fresh
+
+    // Everything is erased: drain the rest of the transfer
+    while (sink.written < sink.total)
+    {
+        if (bmcloud_ws_fw_error(ws) != NULL)
+            break;
+        size_t n = bmcloud_ws_fw_read(ws, buffer, sizeof(buffer), FW_READ_TIMEOUT_MS);
+        if (n == 0)
+            break;
+        if (!fw_sink_write(&sink, buffer, n, error))
+        {
+            just_flasher_abort();
+            goto out;
+        }
+    }
+
+    if (sink.written != sink.total || bmcloud_ws_fw_error(ws) != NULL)
+    {
+        *error = bmcloud_ws_fw_error(ws) != NULL ? bmcloud_ws_fw_error(ws) : "transfer stalled";
+        just_flasher_abort();
         goto out;
     }
 
-    int content_length = esp_http_client_fetch_headers(client);
-    int status         = esp_http_client_get_status_code(client);
-    if (status != HttpStatus_Ok)
+    // The End frame trails the last chunk closely; wait it out
+    for (int i = 0; i < FW_END_TIMEOUT_MS / 100 && !bmcloud_ws_fw_is_done(ws); i++)
+        vTaskDelay(pdMS_TO_TICKS(100));
+    if (!bmcloud_ws_fw_is_done(ws))
     {
-        ESP_LOGE(TAG, "HTTP GET firmware: unexpected status = %d", status);
+        *error = "transfer end missing";
+        just_flasher_abort();
         goto out;
     }
 
+    uint8_t download_digest[32];
+    size_t  digest_len = 0;
+    psa_hash_finish(&download_sha, download_digest, sizeof(download_digest), &digest_len);
+    psa_hash_abort(&download_sha);
+
+    if (job->has_sha256 && memcmp(download_digest, job->sha256, sizeof(download_digest)) != 0)
+        ESP_LOGW(TAG, "Transferred firmware SHA256 mismatch");
+
+    ferr = just_flasher_complete();
+    if (ferr != JustFlasherOk)
     {
-        JustFlasherError ferr = just_flasher_begin(true, CLOUD_FLASHER_LOCK_WAIT_MS);
-        if (ferr != JustFlasherOk)
-        {
-            *error = just_flasher_err_str(ferr);
-            goto out;
-        }
-
-        // Erase exactly what we are about to download, or the whole main bank
-        // when the server does not report the size (chunked response gives -1)
-        ferr = just_flasher_erase(FLASHER_DEFAULT_BASE_ADDR, content_length > 0 ? (size_t) content_length : 0);
-        if (ferr != JustFlasherOk)
-        {
-            *error = just_flasher_err_str(ferr);
-            just_flasher_abort();
-            goto out;
-        }
-
-        char   buffer[FIRMWARE_CHUNK_SIZE];
-        size_t written                = 0;
-        int    last_progress_reported = -1;
-        mbedtls_sha256_context download_sha;
-        mbedtls_sha256_init(&download_sha);
-        mbedtls_sha256_starts(&download_sha, 0);
-
-        while (1)
-        {
-            int data_read = esp_http_client_read(client, buffer, sizeof(buffer));
-            if (data_read < 0)
-            {
-                ESP_LOGE(TAG, "Firmware download interrupted after %zu bytes", written);
-                *error = "firmware download interrupted";
-                just_flasher_abort();
-                goto out;
-            }
-            if (data_read == 0)
-                break;
-
-            mbedtls_sha256_update(&download_sha, (const unsigned char*) buffer, (size_t) data_read);
-
-            ferr = just_flasher_write(FLASHER_DEFAULT_BASE_ADDR + written, buffer, data_read);
-            if (ferr != JustFlasherOk)
-            {
-                *error = just_flasher_err_str(ferr);
-                just_flasher_abort();
-                goto out;
-            }
-            written += data_read;
-
-            // Log progress every 10% when the size is known; each step also
-            // refreshes the job on the server, so a long flash is not reaped
-            if (content_length > 0)
-            {
-                int progress = (int) (written * 100 / (size_t) content_length);
-                if (progress / 10 > last_progress_reported / 10)
-                {
-                    ESP_LOGI(TAG, "Flash progress: %zu / %d bytes (%d%%)", written, content_length, progress);
-                    last_progress_reported = progress;
-                    bmcloud_ws_report_job(ws, job->job_id, BmChannelJobFlashing, NULL);
-                }
-            }
-        }
-
-        uint8_t download_digest[32];
-        mbedtls_sha256_finish(&download_sha, download_digest);
-        mbedtls_sha256_free(&download_sha);
-
-        if (job->has_sha256 && memcmp(download_digest, job->sha256, sizeof(download_digest)) != 0)
-            ESP_LOGW(TAG, "Downloaded firmware SHA256 mismatch");
-
-        if (written != job->size)
-        {
-            ESP_LOGE(TAG, "Firmware size mismatch: got %zu of %llu bytes", written, (unsigned long long) job->size);
-            *error = "firmware size mismatch";
-            just_flasher_abort();
-            goto out;
-        }
-
-        JustFlasherError complete_error = just_flasher_complete();
-        if (complete_error != JustFlasherOk)
-        {
-            *error = just_flasher_err_str(complete_error);
-            just_flasher_abort();
-            goto out;
-        }
-
-        if (job->has_sha256 && !verify_flash_digest(job, written, buffer, sizeof(buffer), error))
-        {
-            just_flasher_abort();
-            goto out;
-        }
-
-        // Reset the target and release it
-        JustFlasherError end_error = just_flasher_end();
-        if (end_error != JustFlasherOk)
-        {
-            *error = just_flasher_err_str(end_error);
-            goto out;
-        }
-        ESP_LOGI(TAG, "Flashed %zu firmware bytes", written);
-        ok = true;
+        *error = just_flasher_err_str(ferr);
+        just_flasher_abort();
+        goto out;
     }
+
+    if (job->has_sha256 && !verify_flash_digest(job, sink.written, buffer, sizeof(buffer), error))
+    {
+        just_flasher_abort();
+        goto out;
+    }
+
+    // Reset the target and release it
+    ferr = just_flasher_end();
+    if (ferr != JustFlasherOk)
+    {
+        *error = just_flasher_err_str(ferr);
+        goto out;
+    }
+    ESP_LOGI(TAG, "Flashed %zu firmware bytes", sink.written);
+    ok = true;
 
 out:
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
     return ok;
 }
 
-/* Run one pushed job: download the firmware, flash it, report the outcome.
- * The websocket reports are queued and shipped by the sender task, so a
- * dropped connection does not lose the result. */
-static void run_job(bmcloud_ws_t* ws, const mstring_t* host, const mstring_t* token, const BmChannelJobType* job)
+/* Run one pushed job: receive the firmware transfer, flash it, report the
+ * outcome. The websocket reports are queued and shipped by the sender task,
+ * so a dropped connection does not lose the result. A failed job resyncs the
+ * receiver in place and keeps the connection: the failure report then lands
+ * on the live socket, ahead of any reconnect replay. Returns the outcome. */
+static bool run_job(bmcloud_ws_t* ws, const BmChannelJobType* job)
 {
     ESP_LOGI(TAG,
              "Running job %llu: firmware %llu, %llu bytes",
@@ -273,22 +286,26 @@ static void run_job(bmcloud_ws_t* ws, const mstring_t* host, const mstring_t* to
 
     bmcloud_ws_report_job(ws, job->job_id, BmChannelJobFlashing, NULL); // claims the job
 
-    const char* error = "firmware download failed";
-    bool        ok    = false;
-
-    for (int attempt = 1; attempt <= FIRMWARE_MAX_ATTEMPTS && !ok; attempt++)
-    {
-        if (attempt > 1)
-            ESP_LOGW(TAG, "Retrying job %llu, attempt %d", (unsigned long long) job->job_id, attempt);
-        ok = download_and_flash(ws, job, mstring_get_cstr(host), mstring_get_cstr(token), &error);
-    }
+    const char* error = "firmware transfer failed";
+    bool        ok    = flash_from_transfer(ws, job, &error);
 
     if (ok)
         ESP_LOGI(TAG, "Job %llu done", (unsigned long long) job->job_id);
     else
+    {
         ESP_LOGE(TAG, "Job %llu failed: %s", (unsigned long long) job->job_id, error);
+        // Cancel the receiver first: the transfer may still be arriving, and
+        // this unblocks the websocket handler instead of letting it sit on a
+        // full stream for the whole send budget
+        bmcloud_ws_fw_fail(ws, "job failed");
+        // Resync in place, keeping the connection: the failure report ships
+        // on the live socket and finishes the job server-side before any
+        // reconnect could replay it
+        bmcloud_ws_fw_reset(ws);
+    }
 
     bmcloud_ws_report_job(ws, job->job_id, ok ? BmChannelJobDone : BmChannelJobFailed, ok ? NULL : error);
+    return ok;
 }
 
 static void network_bmcloud_task(void* pvParameters)
@@ -300,8 +317,9 @@ static void network_bmcloud_task(void* pvParameters)
     s_ws = bmcloud_ws_start();
 
     // at-least-once delivery: the server replays pending jobs on reconnect,
-    // so skip whatever already ran (the last report finishes it server-side)
+    // so skip whatever already ran and re-report its outcome
     uint64_t last_job_id = 0;
+    bool     last_job_ok = false;
 
     while (1)
     {
@@ -322,7 +340,7 @@ static void network_bmcloud_task(void* pvParameters)
             continue;
         }
 
-        // Presence and job pushes; the client reconnects on its own
+        // Presence, job pushes and firmware transfers; the client reconnects on its own
         bmcloud_ws_ensure(s_ws, host, token);
 
         BmChannelJobType job;
@@ -330,17 +348,31 @@ static void network_bmcloud_task(void* pvParameters)
         {
             if (job.job_id == last_job_id)
             {
-                ESP_LOGD(TAG, "Job %llu already ran, skipped", (unsigned long long) job.job_id);
+                // A replay of a job that already ran (its report had not
+                // landed when the connection dropped): re-report the outcome
+                // and drop the transfer trailing the push — draining nothing
+                // would stall the receiver for its whole send budget
+                ESP_LOGI(TAG, "Job %llu already ran, skipped", (unsigned long long) job.job_id);
+                bmcloud_ws_fw_fail(s_ws, "job already ran");
+                bmcloud_ws_fw_reset(s_ws);
+                bmcloud_ws_report_job(s_ws, job.job_id,
+                                      last_job_ok ? BmChannelJobDone : BmChannelJobFailed,
+                                      last_job_ok ? NULL : "already attempted");
             }
             else
             {
                 last_job_id = job.job_id;
-                run_job(s_ws, host, token, &job);
+                last_job_ok = run_job(s_ws, &job);
             }
             // no delay: pick up the next queued job right away
         }
         else
         {
+            // An orphaned receiver failure (a transfer whose job already
+            // reported, a replay raced ahead of the skip above): resync so
+            // the next job does not fail on the stale error
+            if (bmcloud_ws_fw_error(s_ws) != NULL)
+                bmcloud_ws_fw_reset(s_ws);
             vTaskDelay(pdMS_TO_TICKS(CLOUD_POLL_PERIOD_MS));
         }
 
@@ -351,6 +383,12 @@ static void network_bmcloud_task(void* pvParameters)
 
 void network_bmcloud_init(void)
 {
-    // 8 KB stack: TLS handshake with the cert bundle needs headroom
+    // Transfer digests ride PSA crypto; TLS may have initialized it already,
+    // a second call is a harmless no-op
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+        ESP_LOGE(TAG, "psa_crypto_init failed: %ld", (long) status);
+
+    // 8 KB stack: the transfer drain path and the digests need headroom
     xTaskCreate(network_bmcloud_task, "network_bmcloud_task", 8192, NULL, 5, NULL);
 }

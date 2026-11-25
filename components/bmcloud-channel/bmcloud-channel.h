@@ -30,13 +30,16 @@ typedef enum
 /* What a decoded server frame carries */
 typedef enum
 {
-    BmChannelServerAck,   // generic reply to one of our messages
-    BmChannelServerError, // protocol-level error, not a job error
-    BmChannelServerJob,   // pushed job: flash this firmware
-    BmChannelServerOther, // stream / transfer frames, not spoken by this firmware yet
+    BmChannelServerAck,           // generic reply to one of our messages
+    BmChannelServerError,         // protocol-level error, not a job error
+    BmChannelServerJob,           // pushed job: flash this firmware
+    BmChannelServerTransferBegin, // firmware download begins
+    BmChannelServerTransferChunk, // one 8–16 KB slice of the firmware
+    BmChannelServerTransferEnd,   // all chunks sent
+    BmChannelServerOther,         // stream frames, not spoken by this firmware yet
 } BmChannelServerKindType;
 
-/* Decoded Job push; the firmware download itself still goes over REST */
+/* Decoded Job push; the firmware follows as a transfer on the same channel */
 typedef struct
 {
     uint64_t job_id;
@@ -45,6 +48,13 @@ typedef struct
     uint8_t  sha256[32]; // digest of the image, verified against the flash content
     bool     has_sha256;
 } BmChannelJobType;
+
+/* Decoded TransferBegin / TransferEnd */
+typedef struct
+{
+    uint32_t transfer_id;
+    uint64_t total_size; // bytes, Begin only
+} BmChannelTransferInfoType;
 
 /* Decoded server frame */
 typedef struct
@@ -55,6 +65,15 @@ typedef struct
         char for_kind[24 + 1]; // Ack: which of our messages is acknowledged
         char error[64 + 1];    // Error: short server text
         BmChannelJobType job;
+        BmChannelTransferInfoType begin;
+        struct
+        {
+            uint32_t       transfer_id;
+            uint64_t       offset;
+            const uint8_t* data;     // points into the decode buffer:
+            size_t         data_len; // valid until the next bmchannel_decode call
+        } chunk;
+        BmChannelTransferInfoType end;
     } as;
 } BmChannelServerMsgType;
 
@@ -71,6 +90,11 @@ int bmchannel_encode_job_report(
     const char*            error, // text for FAILED, NULL otherwise
     uint8_t*               buf,
     size_t                 size);
+int bmchannel_encode_transfer_ack(
+    uint32_t transfer_id,
+    uint64_t received_bytes, // cumulative; paces the server's send window
+    uint8_t* buf,
+    size_t   size);
 
 /* Decode one server frame; false when the frame is malformed */
 bool bmchannel_decode(const uint8_t* buf, size_t len, BmChannelServerMsgType* out);

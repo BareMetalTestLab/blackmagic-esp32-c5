@@ -46,7 +46,6 @@ typedef struct
     uint64_t firmware_id;
     uint64_t size;       // bytes
     uint8_t  sha256[32]; // digest of the image, verified against the flash content
-    bool     has_sha256;
 } BmChannelJobType;
 
 /* Decoded TransferBegin / TransferEnd */

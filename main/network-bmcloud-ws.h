@@ -20,37 +20,33 @@ void          bmcloud_ws_ensure(bmcloud_ws_t* ws, const mstring_t* host, const m
 void          bmcloud_ws_stop(bmcloud_ws_t* ws);
 
 /* Take one pushed job; false when none are waiting */
-bool bmcloud_ws_pop_job(bmcloud_ws_t* ws, BmChannelJobType* job);
+bool bmcloud_ws_job_pop(bmcloud_ws_t* ws, BmChannelJobType* job, uint32_t timeout_ms);
 
 /* Queue a job report: the sender task ships it and keeps it queued until
  * delivered, so a dropped connection does not lose the outcome */
-void bmcloud_ws_report_job(bmcloud_ws_t* ws, uint64_t job_id, BmChannelJobStatusType status, const char* error);
+void bmcloud_ws_job_report(bmcloud_ws_t* ws, uint64_t job_id, BmChannelJobStatusType status, const char* error);
 
 /* Wait for the next TransferBegin since the previous successful wait;
  * false on timeout or a failed receiver */
-bool bmcloud_ws_fw_wait_begin(bmcloud_ws_t* ws, uint32_t timeout_ms, BmChannelTransferInfoType* info);
+bool bmcloud_ws_fw_transfer_wait_begin(bmcloud_ws_t* ws, uint32_t timeout_ms, BmChannelTransferInfoType* info);
 
 /* Read received firmware bytes; 0 when nothing arrived within the timeout.
  * A zero timeout polls what is already buffered. */
-size_t bmcloud_ws_fw_read(bmcloud_ws_t* ws, void* buf, size_t len, uint32_t timeout_ms);
+size_t bmcloud_ws_fw_transfer_read(bmcloud_ws_t* ws, void* buf, size_t len, uint32_t timeout_ms);
 
 /* TransferEnd seen and every received byte consumed */
-bool bmcloud_ws_fw_is_done(bmcloud_ws_t* ws);
+bool bmcloud_ws_fw_transfer_is_done(bmcloud_ws_t* ws);
 
 /* Receiver failure (stall, overrun, protocol violation); NULL while healthy.
  * Sticky: only a reconnect clears it — call bmcloud_ws_stop to force one. */
-const char* bmcloud_ws_fw_error(bmcloud_ws_t* ws);
-
-/* Cancel the receiver from the job loop side: a failed job stops draining
- * the stream, this unblocks the websocket handler within milliseconds */
-void bmcloud_ws_fw_fail(bmcloud_ws_t* ws, const char* reason);
+const char* bmcloud_ws_fw_transfer_error(bmcloud_ws_t* ws);
 
 /* Resynchronize the receiver in place, keeping the connection: abandon a
  * half-consumed transfer (its late chunks are discarded, the server's send
  * window is released) and clear the failure. The next TransferBegin starts
  * clean. Prefer over stop() when the transport itself is healthy — a queued
  * report ships on the live socket ahead of any reconnect replay. */
-void bmcloud_ws_fw_reset(bmcloud_ws_t* ws);
+void bmcloud_ws_fw_transfer_reset(bmcloud_ws_t* ws);
 
 /* Ack cumulative bytes taken from the transfer; paces the server window */
-void bmcloud_ws_fw_ack(bmcloud_ws_t* ws, uint32_t transfer_id, uint64_t received_bytes);
+void bmcloud_ws_fw_transfer_ack(bmcloud_ws_t* ws, uint32_t transfer_id, uint64_t received_bytes);
